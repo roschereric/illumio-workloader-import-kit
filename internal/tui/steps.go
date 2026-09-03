@@ -617,9 +617,9 @@ func (m *model) startDry() tea.Cmd {
 	engine.WriteCSV(filepath.Join(m.runDir, "skipped.csv"), append(out, "review"), m.buckets.Skipped)
 	m.goTo(stDry)
 	m.setBusy("dry run (wkld-import without --update-pce)")
-	w, c, u, nc, nu := m.w, m.createCSV, m.updateCSV, len(m.buckets.Create), len(m.buckets.Update)
+	w, c, u, cr, up := m.w, m.createCSV, m.updateCSV, m.buckets.Create, m.buckets.Update
 	return func() tea.Msg {
-		lines, ok := w.DryRun(c, u, nc, nu)
+		lines, ok := w.DryRun(c, u, cr, up)
 		return dryDoneMsg{lines, ok}
 	}
 }
@@ -652,7 +652,7 @@ func (m *model) dryView() string {
 		sb.WriteString("  " + st.Render(truncate(l, m.mainWidth()-6)) + "\n")
 	}
 	if !m.dryOK {
-		sb.WriteString("\n" + sErr.Render("The dry run reported errors.") + " Read the log above; you can still execute (not recommended).\n")
+		sb.WriteString("\n" + sErr.Render("The dry run reported warnings, skipped rows or nothing to do.") + " Read the lines above before executing: a batch that does nothing is a wasted run, a skipped row is a row the PCE will not get.\n")
 	}
 	sb.WriteString("\n" + fmt.Sprintf("  %s create %d · update %d · skip %d", sBold.Render("Plan:"), len(m.buckets.Create), len(m.buckets.Update), len(m.buckets.Skipped)) + "\n")
 	sb.WriteString("  " + key("enter", "EXECUTE against the PCE") + "   " + key("x", "stop here and write the report") + "\n")

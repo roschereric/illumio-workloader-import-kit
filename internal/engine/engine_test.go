@@ -134,3 +134,51 @@ func TestClassifyAndApply(t *testing.T) {
 		t.Fatalf("split %+v", b)
 	}
 }
+
+// Regression: workloader picks the match column by priority (href, hostname, name) and skips rows whose
+// match column is blank. Blank-hostname rows therefore need --match name on the create pass and --match
+// href on the update pass; a dry run that skips rows or does nothing must be reported as not ok.
+func TestMatchFlagsForBlankHostnames(t *testing.T) {
+	blank := &Row{Fields: map[string]string{"hostname": "", "name": "X 10.0.0.1", "interfaces": "eth0:10.0.0.1"}, IPs: []string{"10.0.0.1"}}
+	named := &Row{Fields: map[string]string{"hostname": "h1", "name": "H1", "interfaces": "eth0:10.0.0.2"}, IPs: []string{"10.0.0.2"}}
+	if a := strings.Join(CreateArgs([]*Row{blank, named}), " "); a != "--umwl --update=false --match name" {
+		t.Fatalf("create args with blank hostname: %q", a)
+	}
+	if a := strings.Join(CreateArgs([]*Row{named}), " "); a != "--umwl --update=false" {
+		t.Fatalf("create args without blank hostname: %q", a)
+	}
+	if a := strings.Join(UpdateArgs(), " "); a != "--match href" {
+		t.Fatalf("update args: %q", a)
+	}
+	// a mock that behaves like workloader v12.1.9 on the match column
+	dir := t.TempDir()
+	mock := filepath.Join(dir, "wl.sh")
+	os.WriteFile(mock, []byte(`#!/bin/sh
+log=""; match=""; prev=""
+for a in "$@"; do
+  [ "$prev" = "--log-file" ] && log="$a"
+  [ "$prev" = "--match" ] && match="$a"
+  prev="$a"
+done
+[ -z "$match" ] && match=hostname
+if [ "$match" = hostname ]; then
+  echo "2026-01-01 00:00:00 [WARNING] - csv line 2 - the match column cannot be blank." >> "$log"
+  echo "2026-01-01 00:00:00 [INFO] - nothing to be done" >> "$log"
+else
+  echo "2026-01-01 00:00:00 [INFO] - csv line 2 - X 10.0.0.1 to be created" >> "$log"
+fi
+`), 0o755)
+	csvPath := filepath.Join(dir, "to-create.csv")
+	WriteCSV(csvPath, []string{"hostname", "name", "interfaces", "description"}, []*Row{blank})
+	w := &Workloader{Bin: mock, RunDir: dir}
+	lines, ok := w.DryRun(csvPath, "", []*Row{blank}, nil)
+	if !ok {
+		t.Fatalf("dry run with --match name should be ok: %v", lines)
+	}
+	// and without the flag the same mock must be flagged as a problem
+	res := w.Run("dry-bad.log", "wkld-import", csvPath, "--umwl")
+	got := LogLines(res.Log, `cannot be blank|nothing to be done`)
+	if !hasProblem(got) {
+		t.Fatalf("expected the skipped rows to be detected: %v", got)
+	}
+}

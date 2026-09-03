@@ -93,7 +93,12 @@ Minimum terminal: 80×24. Everything must render at that size without wrapping t
 
 ## 5. Engine contract with workloader (verified against v12.1.9)
 
-- Match order of `wkld-import`: href → hostname → name. Never IP. Hence the inventory index by IP in this tool.
+- `wkld-import` matches on ONE column, chosen by `--match` (href | hostname | name | external_data) or, when the flag is
+  absent, by priority over the columns present in the CSV: href, then hostname, then name. Rows whose match column is
+  blank are skipped (`the match column cannot be blank`) — there is no fallback from hostname to name. Never IP, hence
+  the inventory index by IP in this tool. Consequences: the create pass passes `--match name` whenever a row has a
+  blank hostname (`engine.CreateArgs`), the update pass always passes `--match href` (`engine.UpdateArgs`), and a dry
+  run containing `cannot be blank` or `nothing to be done` is reported as not ok (`hasProblem`).
 - `--umwl` creates unmanaged workloads for rows not found; `--update=false` prevents accidental updates on the create pass.
 - `--update-pce` writes; `--no-prompt` skips workloader's own confirmation (this tool already asked).
 - `pce-add --api-key` reads `--api-user/--api-secret/--org`; without `--api-key` workloader asks email/password (never used here).

@@ -5,7 +5,7 @@ args=sys.argv[1:]
 def opt(name):
     return args[args.index(name)+1] if name in args else None
 log=opt("--log-file") or "workloader.log"
-def L(msg): open(log,"a").write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} [INFO] - {msg}\r\n"); print(f"[INFO] - {msg}")
+def L(msg, lvl="INFO"): open(log,"a").write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} [{lvl}] - {msg}\r\n"); print(f"[{lvl}] - {msg}")
 cmd=args[0] if args else ""
 if cmd=="version": print("workloader v12.1.9 (mock)")
 elif cmd=="pce-list": print("+------+------------------+\n| poc  | poc.illum.io     | default |")
@@ -24,6 +24,12 @@ elif cmd=="label-dimension-export":
     csv.writer(open(opt("--output-file"),"w",newline="")).writerows([["href","key","display_name"],["/d/1","role","Role"],["/d/2","app","Application"],["/d/3","env","Environment"],["/d/4","loc","Location"]])
 elif cmd=="wkld-import":
     rows=list(csv.DictReader(open(args[1])))
+    match=opt("--match") or ("href" if "href" in (rows[0] if rows else {}) else "hostname")
+    L(f"match column set to {match} column")
+    blank=[i for i,r in enumerate(rows,2) if not (r.get(match) or "").strip()]
+    for i in blank: L(f"csv line {i} - the match column cannot be blank.", "WARNING")
+    rows=[r for i,r in enumerate(rows,2) if i not in blank]
+    if not rows: L("nothing to be done"); L("wkld-import completed"); sys.exit(0)
     if "--update-pce" in args:
         if "--umwl" in args:
             open("created.txt","a").write(" ".join(r["interfaces"].split(":")[-1] for r in rows)+" ")

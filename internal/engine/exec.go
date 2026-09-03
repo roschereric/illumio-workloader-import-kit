@@ -7,25 +7,44 @@ import (
 	"strings"
 )
 
+// CreateArgs returns the wkld-import flags for the create pass. workloader picks its match COLUMN by
+// priority (href, then hostname, then name) and skips every row whose match column is blank — it never
+// falls back to name. With the PCE convention of blank hostnames the create pass must match on name.
+func CreateArgs(rows []*Row) []string {
+	args := []string{"--umwl", "--update=false"}
+	for _, r := range rows {
+		if strings.TrimSpace(r.Get("hostname")) == "" {
+			return append(args, "--match", "name")
+		}
+	}
+	return args
+}
+
+// UpdateArgs: the update pass carries the href of the existing object, so match on it explicitly.
+func UpdateArgs() []string { return []string{"--match", "href"} }
+
 // DryRun runs wkld-import without --update-pce for the create and update CSVs and returns the
-// interesting log lines. ok=false when workloader exited non-zero.
-func (w *Workloader) DryRun(createCSV, updateCSV string, nCreate, nUpdate int) (lines []string, ok bool) {
+// interesting log lines. ok=false when workloader exited non-zero or reported skipped/blank rows.
+func (w *Workloader) DryRun(createCSV, updateCSV string, create, update []*Row) (lines []string, ok bool) {
 	ok = true
+	nCreate, nUpdate := len(create), len(update)
 	if nCreate > 0 {
-		res := w.Run("dry-create.log", "wkld-import", createCSV, "--umwl", "--update=false")
+		res := w.Run("dry-create.log", append([]string{"wkld-import", createCSV}, CreateArgs(create)...)...)
 		lines = append(lines, "── create (--umwl) ──")
-		lines = append(lines, LogLines(res.Log, `to be created|needs to be created|to be changed|is not a workload|cannot be blank|\[WARN|\[ERROR`)...)
-		if res.RC != 0 {
+		got := LogLines(res.Log, `to be created|needs to be created|to be changed|is not a workload|cannot be blank|nothing to be done|\[WARN|\[ERROR`)
+		lines = append(lines, got...)
+		if res.RC != 0 || hasProblem(got) {
 			ok = false
 		}
 	} else {
 		lines = append(lines, "create: nothing to do")
 	}
 	if nUpdate > 0 {
-		res := w.Run("dry-update.log", "wkld-import", updateCSV)
+		res := w.Run("dry-update.log", append([]string{"wkld-import", updateCSV}, UpdateArgs()...)...)
 		lines = append(lines, "── update (by href) ──")
-		lines = append(lines, LogLines(res.Log, `to be created|to be changed|is not a workload|cannot be blank|\[WARN|\[ERROR`)...)
-		if res.RC != 0 {
+		got := LogLines(res.Log, `to be created|to be changed|is not a workload|cannot be blank|nothing to be done|\[WARN|\[ERROR`)
+		lines = append(lines, got...)
+		if res.RC != 0 || hasProblem(got) {
 			ok = false
 		}
 	} else {
@@ -71,9 +90,9 @@ var labelCreatedRe = regexp.MustCompile(`created new .* label`)
 
 // RunChunk imports one chunk with --update-pce --no-prompt. Returns labels created (log lines).
 func (w *Workloader) RunChunk(c *Chunk) (labels []string) {
-	extra := []string{}
+	extra := UpdateArgs()
 	if c.Name == "create" {
-		extra = []string{"--umwl", "--update=false"}
+		extra = CreateArgs(c.Rows)
 	}
 	args := append([]string{"wkld-import", c.File, "--update-pce", "--no-prompt"}, extra...)
 	c.Status = "running"
@@ -86,7 +105,7 @@ func (w *Workloader) RunChunk(c *Chunk) (labels []string) {
 			labels = append(labels, l)
 		}
 	}
-	c.Errors = LogLines(res.Log, `\[ERROR|\[WARN`)
+	c.Errors = LogLines(res.Log, `\[ERROR|\[WARN|cannot be blank|nothing to be done`)
 	if res.RC == 0 && len(c.Errors) == 0 {
 		c.Status = "ok"
 	} else {
@@ -129,4 +148,14 @@ func (w *Workloader) IPLDry(path string) []string {
 }
 func (w *Workloader) IPLImport(path string) Result {
 	return w.Run("ipl-import.log", "ipl-import", path, "--update-pce", "--no-prompt")
+}
+
+// hasProblem flags dry-run lines that mean rows were skipped or nothing would happen.
+func hasProblem(lines []string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, "cannot be blank") || strings.Contains(l, "[WARN") || strings.Contains(l, "[ERROR") || strings.Contains(l, "nothing to be done") {
+			return true
+		}
+	}
+	return false
 }

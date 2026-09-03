@@ -369,12 +369,18 @@ def main():
 
     # ---- 6 dry run
     banner(6, "Dry run (workloader sin --update-pce)")
+    # workloader elige la COLUMNA de matching por prioridad (href, hostname, name) y descarta las filas con esa
+    # columna vacía; no cae a name. Con hostnames vacíos hay que pedir --match name; para actualizar, --match href.
+    create_extra = ["--umwl", "--update=false"] + (["--match", "name"] if any(not r["hostname"].strip() for r in create) else [])
+    update_extra = ["--match", "href"]
     def dry(path, extra, name):
         if not read_csv(path)[0]: info(f"{name}: nada que hacer"); return True
         p, log = wl.run(["wkld-import", path] + extra, f"dry-{name}.log")
-        for l in log_lines(log, r"to be created|needs to be created|to be changed|is not a workload|cannot be blank|\[WARN|\[ERROR"): print("    " + DIM(l[:W - 6]))
-        return p.returncode == 0
-    d1 = dry(create_csv, ["--umwl", "--update=false"], "create"); d2 = dry(update_csv, [], "update")
+        bad = log_lines(log, r"cannot be blank|nothing to be done|\[WARN|\[ERROR")
+        for l in log_lines(log, r"to be created|needs to be created|to be changed|is not a workload|cannot be blank|nothing to be done|\[WARN|\[ERROR"): print("    " + DIM(l[:W - 6]))
+        if bad: warn(f"{name}: workloader descartó filas o no haría nada ({len(bad)} líneas); revisá el log antes de ejecutar")
+        return p.returncode == 0 and not bad
+    d1 = dry(create_csv, create_extra, "create"); d2 = dry(update_csv, update_extra, "update")
     if not (d1 and d2):
         if ask("El dry run reportó errores.", {"c": "continuar de todos modos", "q": "abortar"}, "q") == "q": sys.exit(1)
     if ask(f"¿Ejecutar contra el PCE? Se crearán {len(create)} y actualizarán {len(update)} workloads.", {"s": "sí, ejecutar", "q": "no, terminar aquí"}, "q") == "q":
@@ -389,7 +395,7 @@ def main():
             while True:
                 progress(n - 1, len(chunks), f"lote {n} ({len(ch)} filas)"); print()
                 p, log = wl.run(["wkld-import", cp, "--update-pce", "--no-prompt"] + extra, f"{name}-chunk{n:03d}.log", check=False)
-                created = log_lines(log, r"created new .* label"); okl = log_lines(log, r"bulk (create|update) workload successful"); errl = log_lines(log, r"\[ERROR|\[WARN")
+                created = log_lines(log, r"created new .* label"); okl = log_lines(log, r"bulk (create|update) workload successful"); errl = log_lines(log, r"\[ERROR|\[WARN|cannot be blank|nothing to be done")
                 for l in created: report["labels_created"].append(l.split(" - ", 1)[-1])
                 if p.returncode == 0 and not errl:
                     bucket.extend(ch); break
@@ -398,8 +404,8 @@ def main():
                 if c2 == "s": report["failed_chunks"].append({"file": cp, "log": log}); break
                 if c2 == "q": report["failed_chunks"].append({"file": cp, "log": log}); progress(len(chunks), len(chunks)); return False
         progress(len(chunks), len(chunks), "listo"); return True
-    if create: execute(create, out_fields, ["--umwl", "--update=false"], "create", report["created"])
-    if update: execute(update, ["href"] + out_fields, [], "update", report["updated"])
+    if create: execute(create, out_fields, create_extra, "create", report["created"])
+    if update: execute(update, ["href"] + out_fields, update_extra, "update", report["updated"])
 
     # ---- 8 verify
     banner(8, "Verificación")
