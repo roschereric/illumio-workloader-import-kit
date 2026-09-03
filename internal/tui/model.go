@@ -102,6 +102,7 @@ type model struct {
 	iplLines  []string
 	reportMD  string
 	finished  bool
+	toolchain string
 }
 
 type check struct {
@@ -112,7 +113,18 @@ type check struct {
 
 // messages
 type logMsg string
-type checksDoneMsg struct{ checks []check }
+type checksDoneMsg struct {
+	checks    []check
+	toolchain string
+}
+type buildDoneMsg struct {
+	path string
+	err  error
+}
+type goInstallDoneMsg struct {
+	err error
+	tag string
+}
 type downloadDoneMsg struct {
 	path string
 	err  error

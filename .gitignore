@@ -36,3 +36,6 @@ go.sandbox.sum
 anon-map.json
 *.anon.csv
 *.real.csv
+
+# umwl-tui settings (machine-specific path to workloader; no secrets)
+umwl-tui.json

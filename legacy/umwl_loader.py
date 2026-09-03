@@ -144,14 +144,15 @@ def bootstrap_workloader(explicit):
     tag = latest_tag()
     info(f"último release publicado: {tag or 'no pude resolverlo (sin red?)'} · sistema: {sys.platform}/{arch}")
     if is_mac and arch == "arm64":
-        info("el release de macOS se compila para Intel (GOOS=darwin sin GOARCH); en Apple Silicon corre vía Rosetta 2, o compilalo nativo con Go (opción c)")
+        info("el release de macOS se compila para Intel (GOOS=darwin sin GOARCH); en Apple Silicon corre vía Rosetta 2: preferí compilarlo nativo con Go (opción c)")
     while True:
-        ch = ask("¿Cómo lo instalamos?", {"d": f"descargar el release {tag or 'latest'} en esta carpeta (curl + unzip)", "c": "git clone + go build (binario nativo; requiere Go)",
-                                          "m": "mostrar los comandos y salir", "q": "salir"}, "d")
+        ch = ask("¿Cómo lo instalamos?", {"c": f"git clone {tag or ''} en ./workloader-src + go build (binario nativo, recomendado; requiere Go y git)",
+                                          "d": f"descargar el release {tag or 'latest'} en esta carpeta (curl + unzip; Intel/Rosetta en Apple Silicon)",
+                                          "m": "mostrar los comandos y salir", "q": "salir"}, "c" if shutil.which("go") else "d")
         if ch == "q": sys.exit(0)
         if ch == "m":
             print(wrap(f"Descarga: curl -LO {REPO}/releases/download/{tag or '<tag>'}/mac-{tag or '<tag>'}.zip && unzip mac-{tag or '<tag>'}.zip && mv mac-{tag or '<tag>'}/workloader . && chmod +x workloader && xattr -d com.apple.quarantine workloader"))
-            print(wrap(f"Build:    git clone {REPO}.git && cd workloader && go build -o ../workloader . && cd .."))
+            print(wrap(f"Build:    git clone --depth 1 --branch {tag or '<tag>'} {REPO}.git workloader-src && cd workloader-src && CGO_ENABLED=0 go build -trimpath -ldflags \"-s -w -X github.com/brian1917/workloader/utils.Version=$(cat version) -X github.com/brian1917/workloader/utils.Commit=$(git rev-list -1 HEAD)\" -o ../workloader . && cd .."))
             sys.exit(0)
         if ch == "d":
             if not tag: err("no pude resolver el tag; probá la opción c o m"); continue
@@ -169,9 +170,15 @@ def bootstrap_workloader(explicit):
         if ch == "c":
             if not shutil.which("go"): err("Go no está instalado (brew install go) — usá la opción d"); continue
             if not shutil.which("git"): err("git no está instalado"); continue
-            if sh(["git", "clone", "--depth", "1", f"{REPO}.git", "workloader-src"]).returncode != 0: err("clone falló"); continue
-            if sh(["go", "build", "-o", "../workloader", "."], cwd="workloader-src").returncode != 0: err("go build falló"); continue
-            os.chmod("./workloader", 0o755); ok("binario compilado en ./workloader")
+            if not os.path.isdir("workloader-src"):
+                clone = ["git", "clone", "--depth", "1"] + (["--branch", tag] if tag else []) + [f"{REPO}.git", "workloader-src"]
+                if sh(clone).returncode != 0: err("clone falló"); continue
+            ver = open("workloader-src/version").read().strip() if os.path.exists("workloader-src/version") else ""
+            commit = subprocess.run(["git", "-C", "workloader-src", "rev-list", "-1", "HEAD"], capture_output=True, text=True).stdout.strip()
+            ldflags = f"-s -w -X github.com/brian1917/workloader/utils.Version={ver} -X github.com/brian1917/workloader/utils.Commit={commit}"
+            env = dict(os.environ, CGO_ENABLED="0")
+            if subprocess.run(["go", "build", "-trimpath", "-ldflags", ldflags, "-o", "../workloader", "."], cwd="workloader-src", env=env).returncode != 0: err("go build falló"); continue
+            os.chmod("./workloader", 0o755); ok(f"binario {ver} compilado nativo en ./workloader")
             return os.path.abspath("./workloader")
 
 def ensure_pce(wl):

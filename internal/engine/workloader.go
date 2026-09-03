@@ -116,24 +116,34 @@ func LogLines(path, pattern string) []string {
 	return out
 }
 
-// FindBinary looks for ./workloader, then PATH, then an explicit path. Returns "" if none.
+// FindBinary resolves the workloader binary: --workloader flag, then the path saved in the umwl-tui settings
+// (./umwl-tui.json, then ~/.config/umwl-tui/config.json), then ./workloader, then PATH. Returns "" if none.
 func FindBinary(explicit string) string {
 	cands := []string{}
 	if explicit != "" {
-		cands = append(cands, explicit)
+		cands = append(cands, ExpandHome(explicit))
 	} else {
+		if st, _ := LoadSettings(); st.Workloader != "" {
+			cands = append(cands, ExpandHome(st.Workloader))
+		}
 		cands = append(cands, "./workloader")
 		if p, err := exec.LookPath("workloader"); err == nil {
 			cands = append(cands, p)
 		}
 	}
 	for _, c := range cands {
-		if st, err := os.Stat(c); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+		if IsExecutable(c) {
 			abs, _ := filepath.Abs(c)
 			return abs
 		}
 	}
 	return ""
+}
+
+// IsExecutable is true for a regular file with an execute bit.
+func IsExecutable(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
 }
 
 // Version runs `workloader version` and returns its first line.
@@ -146,17 +156,72 @@ func Version(bin string) string {
 	return s
 }
 
-// LatestTag resolves the latest release tag via the GitHub redirect (no API token needed).
+// LatestTag resolves the latest release tag: first the GitHub redirect of /releases/latest (no API token
+// needed), then `git ls-remote --tags` (works where plain HTTPS to github.com is filtered but git is not).
 func LatestTag() string {
 	out, err := exec.Command("curl", "-sI", "-o", "/dev/null", "-w", "%{redirect_url}", Repo+"/releases/latest").Output()
+	if err == nil {
+		u := strings.TrimSpace(string(out))
+		if i := strings.LastIndex(u, "/tag/"); i >= 0 && u[i+5:] != "" {
+			return u[i+5:]
+		}
+	}
+	if !HaveGit() {
+		return ""
+	}
+	out, err = exec.Command("git", "ls-remote", "--tags", "--refs", Repo).Output()
 	if err != nil {
 		return ""
 	}
-	m := regexp.MustCompile(`/tag/(v[\d.]+)`).FindStringSubmatch(string(out))
-	if m == nil {
-		return ""
+	best, bestKey := "", []int{}
+	for _, l := range strings.Split(string(out), "\n") {
+		i := strings.LastIndex(l, "refs/tags/")
+		if i < 0 {
+			continue
+		}
+		tag := strings.TrimSpace(l[i+len("refs/tags/"):])
+		key := semverKey(tag)
+		if key == nil {
+			continue
+		}
+		if best == "" || semverLess(bestKey, key) {
+			best, bestKey = tag, key
+		}
 	}
-	return m[1]
+	return best
+}
+
+// semverKey parses vX.Y.Z (a leading v optional) into comparable ints; nil when it is not a plain release tag.
+func semverKey(tag string) []int {
+	t := strings.TrimPrefix(tag, "v")
+	parts := strings.Split(t, ".")
+	if len(parts) != 3 {
+		return nil
+	}
+	key := make([]int, 3)
+	for i, p := range parts {
+		n := 0
+		if p == "" {
+			return nil
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return nil
+			}
+			n = n*10 + int(c-'0')
+		}
+		key[i] = n
+	}
+	return key
+}
+
+func semverLess(a, b []int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
 }
 
 // DownloadRelease fetches the release zip for this OS, unzips it into cwd as ./workloader, strips
@@ -258,4 +323,163 @@ func (w *Workloader) PCEAdd(name, fqdn, port, apiUser, apiSecret, org, disableTL
 func (w *Workloader) ConnTest() bool {
 	res := w.Run("conn-test.log", "label-dimension-export", "--output-file", filepath.Join(w.RunDir, "conn-test.csv"))
 	return res.RC == 0
+}
+
+// ---------------------------------------------------------------- build from source (preferred on Apple Silicon)
+
+const SrcDir = "workloader-src"
+
+// GoVersion returns the output of `go version` or "" when Go is not installed.
+func GoVersion() string {
+	out, err := exec.Command("go", "version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func HaveGit() bool  { _, err := exec.LookPath("git"); return err == nil }
+func HaveBrew() bool { _, err := exec.LookPath("brew"); return err == nil }
+
+// BinaryArch reports the CPU architecture a Mach-O or ELF binary was built for ("arm64", "amd64", "" unknown).
+func BinaryArch(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	hdr := make([]byte, 20)
+	if _, err := io.ReadFull(f, hdr); err != nil {
+		return ""
+	}
+	// Mach-O 64-bit little endian: magic 0xFEEDFACF, cputype at offset 4
+	if hdr[0] == 0xCF && hdr[1] == 0xFA && hdr[2] == 0xED && hdr[3] == 0xFE {
+		cpu := uint32(hdr[4]) | uint32(hdr[5])<<8 | uint32(hdr[6])<<16 | uint32(hdr[7])<<24
+		switch cpu {
+		case 0x0100000C:
+			return "arm64"
+		case 0x01000007:
+			return "amd64"
+		}
+		return ""
+	}
+	// Mach-O universal (fat): magic 0xCAFEBABE big endian
+	if hdr[0] == 0xCA && hdr[1] == 0xFE && hdr[2] == 0xBA && hdr[3] == 0xBE {
+		return "universal"
+	}
+	// ELF: e_machine at offset 18 (little endian)
+	if hdr[0] == 0x7F && hdr[1] == 'E' && hdr[2] == 'L' && hdr[3] == 'F' {
+		m := uint16(hdr[18]) | uint16(hdr[19])<<8
+		switch m {
+		case 0x3E:
+			return "amd64"
+		case 0xB7:
+			return "arm64"
+		}
+	}
+	return ""
+}
+
+// NativeMismatch is true when the binary would run under emulation (Rosetta 2) on this machine.
+func NativeMismatch(path string) bool {
+	a := BinaryArch(path)
+	return a != "" && a != "universal" && a != runtime.GOARCH
+}
+
+func run(out func(string), name string, args ...string) error {
+	out("$ " + name + " " + strings.Join(args, " "))
+	cmd := exec.Command(name, args...)
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	var wg sync.WaitGroup
+	scan := func(r io.Reader) {
+		defer wg.Done()
+		sc := bufio.NewScanner(r)
+		sc.Buffer(make([]byte, 1024*1024), 1024*1024)
+		for sc.Scan() {
+			out("  " + strings.TrimRight(sc.Text(), "\r"))
+		}
+	}
+	wg.Add(2)
+	go scan(stdout)
+	go scan(stderr)
+	wg.Wait()
+	return cmd.Wait()
+}
+
+// BuildFromSource clones (or updates) brian1917/workloader into ./workloader-src and builds a native
+// ./workloader with the local Go toolchain (no Rosetta). tag "" = default branch head; otherwise a release tag.
+func BuildFromSource(tag string, out func(string)) (string, error) {
+	if GoVersion() == "" {
+		return "", fmt.Errorf("Go is not installed (brew install go, or https://go.dev/dl)")
+	}
+	if !HaveGit() {
+		return "", fmt.Errorf("git is not installed (xcode-select --install on macOS)")
+	}
+	if _, err := os.Stat(filepath.Join(SrcDir, ".git")); err == nil {
+		if err := run(out, "git", "-C", SrcDir, "fetch", "--tags", "--quiet"); err != nil {
+			return "", fmt.Errorf("git fetch failed: %w", err)
+		}
+		ref := "origin/HEAD"
+		if tag != "" {
+			ref = tag
+		}
+		if err := run(out, "git", "-C", SrcDir, "checkout", "--quiet", ref); err != nil {
+			return "", fmt.Errorf("git checkout %s failed: %w", ref, err)
+		}
+		if tag == "" {
+			run(out, "git", "-C", SrcDir, "pull", "--quiet", "--ff-only")
+		}
+	} else {
+		args := []string{"clone", "--quiet", Repo, SrcDir}
+		if tag != "" {
+			args = []string{"clone", "--quiet", "--branch", tag, "--depth", "1", Repo, SrcDir}
+		}
+		if err := run(out, "git", args...); err != nil {
+			return "", fmt.Errorf("git clone failed: %w", err)
+		}
+	}
+	bin := "workloader"
+	if runtime.GOOS == "windows" {
+		bin = "workloader.exe"
+	}
+	abs, _ := filepath.Abs(bin)
+	// same ldflags as the upstream release workflow (.github/workflows), otherwise `workloader version` prints nothing
+	ver := ""
+	if b, err := os.ReadFile(filepath.Join(SrcDir, "version")); err == nil {
+		ver = strings.TrimSpace(string(b))
+	}
+	commit := ""
+	if b, err := exec.Command("git", "-C", SrcDir, "rev-list", "-1", "HEAD").Output(); err == nil {
+		commit = strings.TrimSpace(string(b))
+	}
+	ldflags := "-s -w -X github.com/brian1917/workloader/utils.Version=" + ver + " -X github.com/brian1917/workloader/utils.Commit=" + commit
+	cmd := exec.Command("go", "build", "-trimpath", "-ldflags", ldflags, "-o", abs, ".")
+	cmd.Dir = SrcDir
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	out("$ (cd " + SrcDir + " && CGO_ENABLED=0 go build -trimpath -ldflags '" + ldflags + "' -o " + abs + " .)")
+	b, err := cmd.CombinedOutput()
+	for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if l != "" {
+			out("  " + l)
+		}
+	}
+	if err != nil {
+		return "", fmt.Errorf("go build failed: %w", err)
+	}
+	os.Chmod(abs, 0o755)
+	out("built " + abs + " " + ver + " for " + runtime.GOOS + "/" + runtime.GOARCH + " (" + BinaryArch(abs) + ")")
+	return abs, nil
+}
+
+// InstallGoWithBrew runs `brew install go` (macOS/Linuxbrew). Returns an error when brew is absent.
+func InstallGoWithBrew(out func(string)) error {
+	if !HaveBrew() {
+		return fmt.Errorf("Homebrew is not installed; install Go from https://go.dev/dl")
+	}
+	return run(out, "brew", "install", "go")
 }

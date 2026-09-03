@@ -8,6 +8,9 @@ Tools to load the unmanaged workloads and IP lists proposed by an Illumio flow a
 `brian1917/workloader`:
 
 - `umwl-tui` (Go, Bubble Tea) — **the product**: the full-screen application. Source in `cmd/umwl-tui` and `internal/`.
+  Its preflight installs workloader by **building it from source** (`b`: clone into `workloader-src/`, native
+  `go build`), with the Intel-only release download as fallback (`d`) and a saved path to a binary elsewhere
+  (`w`, `umwl-tui.json` / `~/.config/umwl-tui/config.json`).
 - `anonymize_export.py` — pseudonymize exports before the AI analysis / restore names in the proposals (stdlib).
 - `legacy/umwl_loader.py`, `legacy/reconcile_umwl.py` — the earlier plain-terminal implementation (Python stdlib),
   kept as fallback and readable reference; new features go to `umwl-tui` first and are back-ported only if cheap.
@@ -47,6 +50,9 @@ Python side: `python3 -m py_compile legacy/umwl_loader.py legacy/reconcile_umwl.
 - One working folder per Illumio account + PCE (workloader reads `./pce.yaml`). Never commit `pce.yaml`, `workloader`
   binaries, `runs/`, `dist/`, logs (see `.gitignore`).
 - Verify workloader flags against the source (github.com/brian1917/workloader, verified: v12.1.9) before documenting them.
+  The build ldflags mirror its `.github/workflows` (`-X github.com/brian1917/workloader/utils.Version=$(cat version)`);
+  re-check them when bumping the verified version.
+- Never commit `workloader-src/` or `umwl-tui.json` (gitignored). Settings files hold only the workloader path.
 
 ## Security testing checklist (run before every release)
 
@@ -55,8 +61,10 @@ Python side: `python3 -m py_compile legacy/umwl_loader.py legacy/reconcile_umwl.
    round-trip as data (`TestCSVRoundTripHostileCells`); no writes before Execute (`TestQuitBeforeExecuteWritesReport`).
 3. Manual: run `umwl-tui --setup-only` against a mock, then `grep -r <secret> runs/` must find nothing.
 4. Manual: confirm the "Write to the PCE?" modal is the only path to `--update-pce` (`grep -n "update-pce" internal/`).
-5. Review any new `exec.Command` call: binary from `FindBinary`/curl/unzip/xattr only; arguments never from CSV cells
-   except as file paths this tool wrote itself.
+5. Review any new `exec.Command` call: binary from `FindBinary`/curl/unzip/xattr/git/go/brew only; arguments never from
+   CSV cells or free text except as file paths this tool wrote itself (the build tag comes from `LatestTag`).
+   `TestWorkloaderPathSetting` covers the settings precedence and the execute-bit check; `TestBuildOfferWithoutGo`
+   covers the no-toolchain path.
 6. Dependencies: `go.mod` pinned; review `go.sum` diffs in PRs; no new module without a reason in the PR description.
 
 ## Prompts that work well here

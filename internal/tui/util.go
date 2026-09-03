@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -192,4 +194,12 @@ func clip(s string, w, h int) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// relHome shortens a path under the home directory to ~/…
+func relHome(p string) string {
+	if h, err := os.UserHomeDir(); err == nil && h != "" && strings.HasPrefix(p, h+string(filepath.Separator)) {
+		return "~" + p[len(h):]
+	}
+	return p
 }

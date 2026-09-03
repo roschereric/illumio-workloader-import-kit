@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -180,5 +181,81 @@ fi
 	got := LogLines(res.Log, `cannot be blank|nothing to be done`)
 	if !hasProblem(got) {
 		t.Fatalf("expected the skipped rows to be detected: %v", got)
+	}
+}
+
+func TestBinaryArch(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, b []byte) string {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, append(b, make([]byte, 64)...), 0o755)
+		return p
+	}
+	cases := map[string]struct {
+		hdr  []byte
+		want string
+	}{
+		"macho-arm64": {[]byte{0xCF, 0xFA, 0xED, 0xFE, 0x0C, 0x00, 0x00, 0x01}, "arm64"},
+		"macho-amd64": {[]byte{0xCF, 0xFA, 0xED, 0xFE, 0x07, 0x00, 0x00, 0x01}, "amd64"},
+		"macho-fat":   {[]byte{0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 2}, "universal"},
+		"elf-amd64":   {append([]byte{0x7F, 'E', 'L', 'F'}, append(make([]byte, 14), 0x3E, 0x00)...), "amd64"},
+		"elf-arm64":   {append([]byte{0x7F, 'E', 'L', 'F'}, append(make([]byte, 14), 0xB7, 0x00)...), "arm64"},
+		"script":      {[]byte("#!/usr/bin/env python3\n"), ""},
+	}
+	for name, c := range cases {
+		if got := BinaryArch(write(name, c.hdr)); got != c.want {
+			t.Errorf("%s: got %q want %q", name, got, c.want)
+		}
+	}
+	if NativeMismatch(filepath.Join(dir, "script")) || NativeMismatch(filepath.Join(dir, "macho-fat")) {
+		t.Error("scripts and universal binaries never mismatch")
+	}
+	other := "macho-arm64"
+	if runtime.GOARCH == "arm64" {
+		other = "macho-amd64"
+	}
+	if !NativeMismatch(filepath.Join(dir, other)) {
+		t.Errorf("%s should mismatch on %s", other, runtime.GOARCH)
+	}
+}
+
+func TestSettingsLayers(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	old, _ := os.Getwd()
+	os.Chdir(dir)
+	t.Cleanup(func() { os.Chdir(old) })
+	if s, src := LoadSettings(); s.Workloader != "" || src != "" {
+		t.Fatalf("expected empty settings, got %+v %s", s, src)
+	}
+	if _, err := SaveSettings(Settings{Workloader: "~/tools/workloader"}, true); err != nil {
+		t.Fatal(err)
+	}
+	s, src := LoadSettings()
+	if s.Workloader != "~/tools/workloader" || src != UserSettingsPath() {
+		t.Fatalf("user layer: %+v %s", s, src)
+	}
+	SaveSettings(Settings{Workloader: "/opt/wl/workloader"}, false)
+	s, src = LoadSettings()
+	if s.Workloader != "/opt/wl/workloader" || filepath.Base(src) != LocalSettingsFile {
+		t.Fatalf("local layer should override: %+v %s", s, src)
+	}
+	if ExpandHome("~/x") != filepath.Join(dir, "x") || ExpandHome("/abs") != "/abs" {
+		t.Fatal("ExpandHome")
+	}
+	// FindBinary: a saved path that no longer exists falls through to ./workloader
+	os.WriteFile("workloader", []byte("#!/bin/sh\n"), 0o755)
+	if got := FindBinary(""); filepath.Base(got) != "workloader" || filepath.Dir(got) != dir {
+		t.Fatalf("fallback to ./workloader failed: %s", got)
+	}
+}
+
+func TestSemverKey(t *testing.T) {
+	if semverKey("v12.1.9") == nil || semverKey("12.1.9") == nil || semverKey("v12.1") != nil || semverKey("v1.2.3-rc1") != nil {
+		t.Fatal("semverKey")
+	}
+	if !semverLess(semverKey("v9.9.0"), semverKey("v12.1.9")) || semverLess(semverKey("v12.1.9"), semverKey("v12.1.8")) {
+		t.Fatal("semverLess must compare numerically, not lexically")
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/roschereric/illumio-workloader-import-kit/internal/engine"
 )
 
 // drain executes commands synchronously and feeds their messages back into the model,
@@ -271,5 +273,99 @@ func TestPickerFlowAndBadCSVRecovery(t *testing.T) {
 	}
 	if m.cfg.CSV != "cliente3-umwl-import-v2.csv" {
 		t.Fatalf("expected relative path, got %q", m.cfg.CSV)
+	}
+}
+
+// The workloader binary can live anywhere: w → picker → validate → save in the local or user settings file.
+func TestWorkloaderPathSetting(t *testing.T) {
+	m, dir := setup(t)
+	t.Setenv("HOME", filepath.Join(dir, "home"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "home", ".config"))
+	// move the mock out of the working folder so the default lookup fails
+	shared := filepath.Join(dir, "home", "bin")
+	os.MkdirAll(shared, 0o755)
+	os.Rename(filepath.Join(dir, "workloader"), filepath.Join(shared, "workloader"))
+	drain(t, m, m.Init())
+	if m.checks[0].Status != "fail" || !strings.Contains(m.checks[0].Detail, "press b") {
+		t.Fatalf("expected missing-binary check offering build: %+v", m.checks[0])
+	}
+	press(t, m, "w")
+	if m.picker == nil || m.picker.Title != "workloader binary" {
+		t.Fatal("expected the binary picker")
+	}
+	// a non-executable file is refused
+	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("x"), 0o644)
+	press(t, m, "tab")
+	m.picker.input.SetValue(filepath.Join(dir, "notes.txt"))
+	press(t, m, "enter")
+	if m.modal == nil || m.modal.Title != "Not executable" {
+		t.Fatalf("expected refusal, modal=%v", m.modal)
+	}
+	press(t, m, "enter")
+	// pick the real one, typed with ~
+	press(t, m, "w", "tab")
+	m.picker.input.SetValue("~/bin/workloader")
+	press(t, m, "enter")
+	if m.modal == nil || m.modal.Title != "Save workloader path" {
+		t.Fatalf("expected the save-scope modal, got %v", m.modal)
+	}
+	press(t, m, "u") // user scope → saved, checks re-run
+	st, src := engine.LoadSettings()
+	if st.Workloader != "~/bin/workloader" || src != engine.UserSettingsPath() {
+		t.Fatalf("settings not saved: %+v from %s", st, src)
+	}
+	if m.checks[0].Status != "ok" || !strings.Contains(m.checks[0].Detail, "path from ~/.config/umwl-tui/config.json") {
+		t.Fatalf("expected the saved path to be used: %+v", m.checks[0])
+	}
+	// the local file overrides the user file
+	engine.SaveSettings(engine.Settings{Workloader: "~/bin/workloader"}, false)
+	if _, src := engine.LoadSettings(); !strings.HasSuffix(src, engine.LocalSettingsFile) {
+		t.Fatalf("local settings should win, got %s", src)
+	}
+	if engine.FindBinary("") != filepath.Join(shared, "workloader") {
+		t.Fatalf("FindBinary ignored the ~ path: %s", engine.FindBinary(""))
+	}
+}
+
+// b = build from source: with no Go toolchain on PATH the TUI explains the manual steps instead of failing later.
+func TestBuildOfferWithoutGo(t *testing.T) {
+	m, dir := setup(t)
+	drain(t, m, m.Init())
+	empty := filepath.Join(dir, "emptypath")
+	os.MkdirAll(empty, 0o755)
+	t.Setenv("PATH", empty)
+	press(t, m, "b")
+	if m.modal == nil || m.modal.Title != "Go toolchain missing" {
+		t.Fatalf("expected the toolchain modal, got %v", m.modal)
+	}
+	v := m.View()
+	for _, want := range []string{"git clone https://github.com/brian1917/workloader", "go build -o ../workloader", "brew install go"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("manual instructions missing %q:\n%s", want, v)
+		}
+	}
+	press(t, m, "enter")
+	if m.modal != nil {
+		t.Fatal("modal should close")
+	}
+}
+
+// With Go and git present the build is offered first (recommended) and esc cancels without touching the disk.
+func TestBuildOfferWithGo(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not on PATH")
+	}
+	m, dir := setup(t)
+	drain(t, m, m.Init())
+	if !strings.Contains(m.View(), "build workloader from source (native, recommended)") {
+		t.Fatalf("build action not offered:\n%s", m.View())
+	}
+	press(t, m, "b")
+	if m.modal == nil || !strings.HasPrefix(m.modal.Title, "Build workloader") {
+		t.Fatalf("expected the build modal, got %v", m.modal)
+	}
+	press(t, m, "esc")
+	if _, err := os.Stat(filepath.Join(dir, engine.SrcDir)); err == nil {
+		t.Fatal("cancel must not clone")
 	}
 }

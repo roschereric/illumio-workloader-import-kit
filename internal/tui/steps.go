@@ -21,36 +21,68 @@ func (m *model) runChecks() tea.Cmd {
 	w := m.w
 	return func() tea.Msg {
 		var cs []check
+		tc := toolchainInfo()
 		bin := engine.FindBinary(cfg.WorkloaderBin)
 		if bin == "" {
-			cs = append(cs, check{"workloader binary", "fail", "not found in ./workloader, PATH or --workloader — press d to download the release"})
+			cs = append(cs, check{"workloader binary", "fail", "not found in ./workloader, PATH or --workloader — press b to build it from source (recommended) or d to download the release"})
 			cs = append(cs, check{"pce.yaml", "pending", "checked once workloader is present"})
 			cs = append(cs, check{"PCE connection", "pending", ""})
-			return checksDoneMsg{cs}
+			return checksDoneMsg{cs, tc}
 		}
 		w.Bin = bin
 		ver := engine.Version(bin)
-		cs = append(cs, check{"workloader binary", "ok", bin + "  " + ver})
+		if _, src := engine.LoadSettings(); src != "" && cfg.WorkloaderBin == "" {
+			ver += "  [path from " + relHome(src) + "]"
+		}
+		if engine.NativeMismatch(bin) {
+			cs = append(cs, check{"workloader binary", "warn", bin + "  " + ver + " — " + engine.BinaryArch(bin) + " binary on " + runtime.GOARCH + " (runs under emulation/Rosetta 2); press b to rebuild native"})
+		} else {
+			arch := ""
+			if a := engine.BinaryArch(bin); a != "" {
+				arch = "  (" + a + ", native)"
+			}
+			cs = append(cs, check{"workloader binary", "ok", bin + "  " + ver + arch})
+		}
 		st := w.PCEList()
 		if st.Configured {
 			cs = append(cs, check{"pce.yaml", "ok", st.ConfigPath + " — " + pceSummary(st.Listing)})
 		} else {
 			cs = append(cs, check{"pce.yaml", "fail", st.ConfigPath + " has no PCE — press p to run pce-add --api-key"})
 			cs = append(cs, check{"PCE connection", "pending", "after pce-add"})
-			return checksDoneMsg{cs}
+			return checksDoneMsg{cs, tc}
 		}
 		if w.ConnTest() {
 			cs = append(cs, check{"PCE connection", "ok", "label-dimension-export succeeded (read-only)"})
 		} else {
 			cs = append(cs, check{"PCE connection", "fail", "label-dimension-export failed — check FQDN / API key / org"})
 		}
-		return checksDoneMsg{cs}
+		return checksDoneMsg{cs, tc}
 	}
+}
+
+// toolchainInfo summarises what is available to build workloader from source.
+func toolchainInfo() string {
+	gov := engine.GoVersion()
+	parts := []string{}
+	if gov == "" {
+		parts = append(parts, "go: missing")
+	} else {
+		parts = append(parts, strings.TrimPrefix(gov, "go version "))
+	}
+	if engine.HaveGit() {
+		parts = append(parts, "git: ok")
+	} else {
+		parts = append(parts, "git: missing")
+	}
+	if engine.HaveBrew() {
+		parts = append(parts, "brew: ok")
+	}
+	return strings.Join(parts, "   ")
 }
 
 func (m *model) preflightOK() bool {
 	for _, c := range m.checks {
-		if c.Status != "ok" {
+		if c.Status != "ok" && c.Status != "warn" {
 			return false
 		}
 	}
@@ -60,7 +92,7 @@ func (m *model) preflightOK() bool {
 func (m *model) preflightView() string {
 	var sb strings.Builder
 	sb.WriteString(section("Environment") + "\n")
-	sb.WriteString(fmt.Sprintf("  cwd        %s\n  runs       %s\n  os/arch    %s/%s   umwl-tui %s\n\n", cwd(), m.runDir, runtime.GOOS, runtime.GOARCH, m.cfg.Version))
+	sb.WriteString(fmt.Sprintf("  cwd        %s\n  runs       %s\n  os/arch    %s/%s   umwl-tui %s\n  toolchain  %s\n\n", cwd(), m.runDir, runtime.GOOS, runtime.GOARCH, m.cfg.Version, orDash(m.toolchain)))
 	sb.WriteString(section("Checks") + "\n")
 	if len(m.checks) == 0 {
 		sb.WriteString("  " + m.spin.View() + " running…\n")
@@ -70,7 +102,10 @@ func (m *model) preflightView() string {
 		sb.WriteString(fmt.Sprintf("  %s %-18s %s\n", g, c.Label, wrapIndent(c.Detail, m.mainWidth()-26, 23)))
 	}
 	sb.WriteString("\n" + section("Actions") + "\n")
-	sb.WriteString("  " + key("d", "download workloader release") + "   " + key("p", "pce-add (API key)") + "   " + key("t", "test connection") + "   " + key("r", "re-run checks") + "\n")
+	sb.WriteString("  " + key("b", "build workloader from source (native, recommended)") + "\n")
+	sb.WriteString("  " + key("d", "download release binary (fallback; Intel-only on macOS)") + "\n")
+	sb.WriteString("  " + key("w", "use a workloader binary elsewhere (saved in umwl-tui settings)") + "\n")
+	sb.WriteString("  " + key("p", "pce-add (API key)") + "   " + key("t", "test connection") + "   " + key("r", "re-run checks") + "\n")
 	if m.preflightOK() {
 		if m.cfg.SetupOnly {
 			sb.WriteString("\n" + sOK.Render("Setup complete.") + " Run again with the CSV when it is ready. " + key("q", "quit") + "\n")
@@ -85,19 +120,23 @@ func (m *model) preflightView() string {
 }
 
 func (m *model) preflightKeys() []string {
-	return []string{key("enter", "next"), key("d", "download"), key("p", "pce-add"), key("t", "test"), key("r", "re-check")}
+	return []string{key("enter", "next"), key("b", "build"), key("d", "download"), key("w", "path"), key("p", "pce-add"), key("t", "test"), key("r", "re-check")}
 }
 
 func (m *model) preflightKey(k string) (tea.Model, tea.Cmd) {
 	switch k {
 	case "r":
 		return m, m.runChecks()
+	case "b":
+		return m, m.offerBuild()
+	case "w":
+		return m, m.pickWorkloaderPath()
 	case "d":
 		tag := engine.LatestTag()
-		body := []string{"Downloads the workloader release for this OS into the current folder as ./workloader and removes the macOS quarantine flag.",
+		body := []string{"Fallback when Go cannot be installed: downloads the pre-built workloader release for this OS into the current folder as ./workloader and removes the macOS quarantine flag.",
 			"Latest tag: " + orDash(tag) + "   OS: " + runtime.GOOS + "/" + runtime.GOARCH}
 		if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-			body = append(body, "The macOS release is an Intel binary; it runs under Rosetta 2. For a native build: brew install go && go build from a clone of "+engine.Repo)
+			body = append(body, "The macOS release is an Intel (x86_64) binary: it runs under Rosetta 2 on this Mac. Prefer b (build from source) for a native arm64 binary.")
 		}
 		m.modal = choiceModal("Download workloader "+orDash(tag)+"?", body, []Option{{Key: "y", Label: "download"}, {Key: "esc", Label: "cancel"}}, func(m *model, key string) tea.Cmd {
 			if key != "y" {
@@ -162,6 +201,108 @@ func (m *model) preflightKey(k string) (tea.Model, tea.Cmd) {
 		return m, m.loadCSV()
 	}
 	return m, nil
+}
+
+// offerBuild is the preferred workloader install path: clone brian1917/workloader into ./workloader-src and
+// `go build` a native binary for this OS/arch (no Rosetta on Apple Silicon). When Go is missing it offers
+// `brew install go` (macOS/Linuxbrew) or prints the manual steps.
+func (m *model) offerBuild() tea.Cmd {
+	tag := engine.LatestTag()
+	if engine.GoVersion() == "" {
+		manual := []string{
+			"Go is not installed. Install it and press b again:",
+			"  macOS:  brew install go        (or the installer from https://go.dev/dl)",
+			"  Linux:  sudo apt install golang-go  /  https://go.dev/dl",
+			"Manual build without this tool: git clone " + engine.Repo + " " + engine.SrcDir + " && cd " + engine.SrcDir + " && go build -o ../workloader .",
+		}
+		if engine.HaveBrew() {
+			m.modal = choiceModal("Go toolchain missing", append([]string{"Build from source needs Go (≥1.21) and git. Homebrew is available: install Go now, then build workloader " + orDash(tag) + "?"}, manual[2:]...),
+				[]Option{{Key: "y", Label: "brew install go, then build"}, {Key: "d", Label: "download release instead"}, {Key: "esc", Label: "cancel"}},
+				func(m *model, key string) tea.Cmd {
+					switch key {
+					case "y":
+						m.setBusy("brew install go")
+						out := m.w.Out
+						return func() tea.Msg { return goInstallDoneMsg{engine.InstallGoWithBrew(out), tag} }
+					case "d":
+						_, cmd := m.preflightKey("d")
+						return cmd
+					}
+					return nil
+				})
+			return nil
+		}
+		if !engine.HaveGit() {
+			manual = append(manual, "git is also missing: xcode-select --install (macOS) / apt install git (Linux).")
+		}
+		m.modal = infoModal("Go toolchain missing", manual)
+		return nil
+	}
+	if !engine.HaveGit() {
+		m.modal = infoModal("git missing", []string{"Build from source needs git: xcode-select --install (macOS) / apt install git (Linux). Or press d to download the release binary."})
+		return nil
+	}
+	body := []string{
+		"Clones " + engine.Repo + " (tag " + orDash(tag) + ") into ./" + engine.SrcDir + " and runs go build for " + runtime.GOOS + "/" + runtime.GOARCH + " → ./workloader",
+		"Native binary, no Rosetta 2. First build downloads the Go modules (~1–3 min); later builds reuse the clone.",
+		"Toolchain: " + orDash(m.toolchain),
+	}
+	m.modal = choiceModal("Build workloader "+orDash(tag)+" from source?", body, []Option{{Key: "y", Label: "clone + build"}, {Key: "esc", Label: "cancel"}}, func(m *model, key string) tea.Cmd {
+		if key != "y" {
+			return nil
+		}
+		return m.buildCmd(tag)
+	})
+	return nil
+}
+
+// pickWorkloaderPath lets the user point umwl-tui at a workloader binary anywhere on disk (a build shared by
+// several working folders, a different version) and remembers it in ./umwl-tui.json or the user config.
+func (m *model) pickWorkloaderPath() tea.Cmd {
+	start := ""
+	if m.w.Bin != "" {
+		start = filepath.Dir(m.w.Bin)
+	}
+	m.picker = newPicker("workloader binary", "Select the workloader executable to use. Type a path on top (tab), ~ = home. The choice is saved so PATH never needs editing.", start, nil,
+		func(m *model, path string) tea.Cmd {
+			path, _ = filepath.Abs(engine.ExpandHome(path))
+			if !engine.IsExecutable(path) {
+				m.modal = infoModal("Not executable", []string{path, "Pick a workloader binary (file with the execute bit). On macOS run: chmod +x <file>; xattr -d com.apple.quarantine <file>."})
+				return nil
+			}
+			ver := engine.Version(path)
+			if !strings.Contains(strings.ToLower(ver), "workloader") && !strings.Contains(ver, "v") {
+				ver = "(could not read a version from it: " + orDash(ver) + ")"
+			}
+			m.modal = choiceModal("Save workloader path", []string{path, ver, "Where should umwl-tui remember it?",
+				"  l  this working folder  → " + relHome(engine.SettingsPath(false)),
+				"  u  this user, every folder → " + relHome(engine.SettingsPath(true))},
+				[]Option{{Key: "l", Label: "local"}, {Key: "u", Label: "user"}, {Key: "esc", Label: "cancel"}},
+				func(m *model, key string) tea.Cmd {
+					if key != "l" && key != "u" {
+						return nil
+					}
+					file, err := engine.SaveSettings(engine.Settings{Workloader: relHome(path)}, key == "u")
+					if err != nil {
+						m.fail("could not save settings: " + err.Error())
+						return nil
+					}
+					m.cfg.WorkloaderBin = ""
+					m.event("workloader path saved in " + relHome(file))
+					return m.runChecks()
+				})
+			return nil
+		})
+	return nil
+}
+
+func (m *model) buildCmd(tag string) tea.Cmd {
+	m.setBusy("building workloader from source")
+	out := m.w.Out
+	return func() tea.Msg {
+		p, err := engine.BuildFromSource(tag, out)
+		return buildDoneMsg{p, err}
+	}
 }
 
 // ------------------------------------------------------------------ step 1: CSV
@@ -990,6 +1131,7 @@ func (m *model) onWork(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case checksDoneMsg:
 		m.checks = msg.checks
+		m.toolchain = msg.toolchain
 		m.idle()
 		if m.preflightOK() {
 			m.event("preflight ok — " + strings.TrimPrefix(m.checks[1].Detail, engine.ConfigPath()+" — "))
@@ -1003,6 +1145,24 @@ func (m *model) onWork(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cfg.WorkloaderBin = msg.path
 		m.event("workloader downloaded: " + msg.path)
 		return m, m.runChecks()
+	case buildDoneMsg:
+		m.idle()
+		if msg.err != nil {
+			m.fail("build failed: " + msg.err.Error())
+			m.modal = infoModal("Build failed", []string{msg.err.Error(), "See the log pane. Manual steps: git clone " + engine.Repo + " " + engine.SrcDir + " && cd " + engine.SrcDir + " && go build -o ../workloader .", "Or press d to download the release binary (Intel/Rosetta on Apple Silicon)."})
+			return m, nil
+		}
+		m.cfg.WorkloaderBin = msg.path
+		m.event("workloader built from source: " + msg.path)
+		return m, m.runChecks()
+	case goInstallDoneMsg:
+		m.idle()
+		if msg.err != nil {
+			m.fail("brew install go failed: " + msg.err.Error())
+			return m, nil
+		}
+		m.event("Go installed: " + strings.TrimPrefix(engine.GoVersion(), "go version "))
+		return m, m.buildCmd(msg.tag)
 	case pceAddDoneMsg:
 		m.idle()
 		if msg.res.RC != 0 {

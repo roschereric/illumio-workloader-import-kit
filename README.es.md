@@ -11,7 +11,7 @@ English: [README.md](README.md)
 1. Carpeta de trabajo (una por cuenta de Illumio + PCE, sección siguiente; todos los comandos de abajo corren ahí): `mkdir -p ~/illumio/cliente-a/scp57-org12 && cd ~/illumio/cliente-a/scp57-org12`
 2. El kit (repositorio privado: antes `gh auth login` o una clave SSH cargada en GitHub): `git clone https://github.com/roschereric/illumio-workloader-import-kit.git kit`
 3. El binario: `gh release download --repo roschereric/illumio-workloader-import-kit --pattern 'umwl-tui-darwin-arm64' --pattern SHA256SUMS && shasum -a 256 -c SHA256SUMS --ignore-missing && mv umwl-tui-darwin-arm64 umwl-tui && chmod +x umwl-tui && xattr -d com.apple.quarantine umwl-tui` (o compilalo: `(cd kit && make build) && cp kit/umwl-tui .`).
-4. workloader + `pce.yaml` + prueba de conexión: `./umwl-tui --setup-only` (descarga workloader, ejecuta `pce-add --api-key`, prueba con `label-dimension-export`).
+4. workloader + `pce.yaml` + prueba de conexión: `./umwl-tui --setup-only` (tecla `b`: clona workloader en `workloader-src/` y compila un `./workloader` nativo — `d` descarga el release Intel como alternativa, `w` apunta a un binario que ya tengas; después `pce-add --api-key` y una prueba con `label-dimension-export`).
 5. Exportar desde el PCE (consola: guía §4 "Exportar desde el PCE"; o workloader): `./workloader traffic --start 2026-08-17 --end 2026-09-01 --max-results 200000 --output-file TrafficData.csv`, y después `./workloader wkld-export --output-file pce-workloads.csv`, `./workloader label-export --output-file pce-labels.csv`, `./workloader label-dimension-export --output-file pce-label-types.csv`.
 6. Pseudonimizar antes de compartir: `python3 kit/anonymize_export.py anon TrafficData.csv -o TrafficData.anon.csv --map anon-map.json --customer "Cliente A" --domain cliente-a.com`
 7. Análisis en un Proyecto de Claude: instrucciones = `kit/docs/prompts/context.md`, mensaje = `kit/docs/prompts/prompt-short.md`, adjuntos = `TrafficData.anon.csv` + los exports `pce-*.csv`. Devuelve el informe, `<grupo>-umwl-import.csv` y `<grupo>-ipl-import.csv`.
@@ -36,7 +36,9 @@ Si en una misma carpeta conviven `pce.yaml` de dos tenants (o un `pce.yaml` con 
 ├── cliente-a/
 │   ├── scp57-org12/                  # cuenta cliente-a, PCE SaaS scp57, org 12
 │   │   ├── umwl-tui                  # la aplicación (binario del release o make build)
-│   │   ├── workloader                # binario; lo descarga umwl-tui (o symlink a uno compartido)
+│   │   ├── workloader                # binario nativo compilado por umwl-tui (b) — o una ruta guardada en umwl-tui.json
+│   │   ├── workloader-src/           # clon de brian1917/workloader usado para compilar (gitignored)
+│   │   ├── umwl-tui.json             # opcional: ruta a un binario workloader en otro lugar (sin secretos)
 │   │   ├── pce.yaml                  # SOLO esta cuenta + PCE; lo crea pce-add; nunca copiarlo
 │   │   ├── anon-map.json             # mapa de pseudónimos; nunca sale de esta carpeta
 │   │   ├── cliente-a-umwl-import.csv
@@ -66,7 +68,7 @@ Antes de cada corrida, `umwl-tui` ejecuta `workloader pce-list` y te muestra el 
 ## Requisitos
 
 - **macOS** (probado en Apple Silicon; el flujo es el mismo en Intel y en Linux). `umwl-tui` se publica como binario estático para darwin/arm64, darwin/amd64, linux/amd64 y linux/arm64; compilarlo requiere **Go 1.24+**. **Python 3.9+** (solo biblioteca estándar) para `anonymize_export.py` y los loaders legacy.
-- **workloader v12.x**. No requiere instalación: es un binario. El release de macOS se publica como `mac-<versión>.zip`; en Apple Silicon corre vía Rosetta 2. `umwl-tui --setup-only` lo descarga, o lo compila desde el fuente si Go está instalado.
+- **workloader v12.x**, preferentemente **compilado desde el fuente** (`umwl-tui --setup-only` → `b`): requiere **Go 1.24+** y **git** (`brew install go`; git viene con `xcode-select --install`). Motivo: el release de macOS publicado upstream (`mac-<versión>.zip`) es un binario solo Intel que en Apple Silicon corre vía Rosetta 2; un `go build` local da un binario arm64 nativo, reproducible desde un tag. La descarga del release queda como alternativa (`d`) para máquinas sin Go.
 - Una **API key del PCE con permisos de escritura**. La key hereda el rol del usuario que la crea: si el usuario es de solo lectura, `wkld-import --update-pce` falla. Para crearla: menú de usuario (arriba a la derecha) → **My API Keys** → **Add**; guardá el **Authentication Username** (`api_…`) y el **Secret**, que solo se muestran una vez. También sirve una service account con permisos equivalentes. **Acceso de red al PCE por HTTPS** (puerto 443 en SaaS, 8443 típico on-prem). En SaaS el `org id` es el número que aparece en la URL de la consola (`…/orgs/<id>/…`).
 
 ## Inicialización de la carpeta de trabajo
@@ -75,7 +77,28 @@ Se hace una vez por combinación cuenta + PCE; después, cada carga es un solo c
 
 1. **Carpeta**: `mkdir -p ~/illumio/cliente-a/scp57-org12 && cd ~/illumio/cliente-a/scp57-org12`. Todo lo que sigue corre con esa carpeta como directorio actual: `./umwl-tui`, `./workloader`, `./pce.yaml` y `./runs` quedan junto a los CSV, no dentro del clon.
 2. **Kit**: `git clone https://github.com/roschereric/illumio-workloader-import-kit.git kit` (equivalente: `gh repo clone …`; sin git: Code → Download ZIP, descomprimido como `kit/`). Los CSV viven en la carpeta de trabajo, no en `kit/`; `kit/examples/` contiene solo plantillas. Actualizar con `git -C kit pull`. Para compartir un solo clon entre carpetas: `ln -s ~/illumio/kit-shared kit`. Después, `umwl-tui` mismo: binario del release o `make build` (ver "Instalación" más abajo).
-3. **workloader y pce.yaml**: `./umwl-tui --setup-only`. Busca `./workloader` (después el PATH, o la ruta de `--workloader`). Si no lo encuentra ofrece descargar el release (`mac-<versión>.zip`, con `curl` + `unzip` y `xattr -d com.apple.quarantine`) o clonar el repositorio de workloader en `workloader-src/` y compilar con `go build`. Después corre `pce-list`; si no hay `pce.yaml`, o workloader responde "no pce configured", va directo a `pce-add`: pide nombre corto, FQDN, puerto, API user, API secret y org id, ejecuta `pce-add --api-key …` con esos valores (así workloader nunca pide correo y contraseña), vuelve a mostrar `pce-list` y prueba la conexión con un `label-dimension-export`. (Alternativa sin el binario: `python3 kit/legacy/umwl_loader.py --setup-only` hace el mismo paso.)
+3. **workloader y pce.yaml**: `./umwl-tui --setup-only`. Busca workloader en este orden: `--workloader <ruta>`, la ruta guardada en `./umwl-tui.json` o `~/.config/umwl-tui/config.json`, `./workloader`, el PATH. La fila del chequeo muestra la versión y la arquitectura de CPU del binario encontrado (`arm64, native`, o una advertencia cuando un binario Intel correría bajo Rosetta 2). Si no encuentra nada — o querés un binario nativo — presioná **`b`** (recomendado): clona `github.com/brian1917/workloader` en el tag del último release dentro de `./workloader-src/` (un nombre distinto al del binario, así `./workloader` puede convivir al lado), ejecuta `CGO_ENABLED=0 go build` con los mismos `-ldflags` que el workflow de release upstream (para que `workloader version` informe el tag) y escribe `./workloader`. Si falta Go y existe Homebrew, ofrece `brew install go` primero; si no, muestra los comandos manuales (subsección siguiente). **`d`** descarga el release precompilado (`mac-<versión>.zip` con `curl` + `unzip` y `xattr -d com.apple.quarantine`; Intel/Rosetta en Apple Silicon). **`w`** abre el selector de archivos para apuntar umwl-tui a un workloader que ya tengas en cualquier lugar del disco y guarda esa ruta (ver "Reutilizar un binario workloader" más abajo). Después corre `pce-list`; si no hay `pce.yaml`, o workloader responde "no pce configured", va directo a `pce-add`: pide nombre corto, FQDN, puerto, API user, API secret y org id, ejecuta `pce-add --api-key …` con esos valores (así workloader nunca pide correo y contraseña), vuelve a mostrar `pce-list` y prueba la conexión con un `label-dimension-export`. (Alternativa sin el binario: `python3 kit/legacy/umwl_loader.py --setup-only` hace el mismo paso.)
+### Compilar workloader a mano (si preferís, o cuando `b` no puede correr)
+
+Los comandos exactos que ejecuta umwl-tui, para una terminal en la carpeta de trabajo. Cloná con un **nombre de carpeta distinto** al del binario (`workloader-src`); si no, el clon y el ejecutable chocan:
+
+```bash
+brew install go                      # una vez por Mac (Go 1.24+); git: xcode-select --install
+git clone --depth 1 --branch v12.1.9 https://github.com/brian1917/workloader workloader-src
+cd workloader-src
+CGO_ENABLED=0 go build -trimpath \
+  -ldflags "-s -w -X github.com/brian1917/workloader/utils.Version=$(cat version) -X github.com/brian1917/workloader/utils.Commit=$(git rev-list -1 HEAD)" \
+  -o ../workloader .
+cd ..
+./workloader version                 # imprime el tag; `file ./workloader` muestra "Mach-O 64-bit executable arm64"
+```
+
+Elegí el tag con `git ls-remote --tags https://github.com/brian1917/workloader | tail`. Para actualizar después: `git -C workloader-src fetch --tags && git -C workloader-src checkout v12.2.0` y compilar de nuevo. La primera compilación descarga los módulos Go de workloader (~1–3 minutos, necesita proxy.golang.org o `GOPROXY=direct`); las siguientes tardan segundos. No se instala nada a nivel de sistema, sin `sudo`, sin tocar el PATH: el binario es un archivo común que podés copiar (`cp workloader ~/tools/workloader`) a cualquier otra carpeta de trabajo o ubicación compartida.
+
+### Reutilizar un binario workloader entre carpetas de trabajo
+
+No hace falta un clon por carpeta. Compilá una vez en un lugar compartido (`~/tools/workloader-src` → `~/tools/workloader`) y después, en cada carpeta de trabajo, corré `./umwl-tui --setup-only`, presioná **`w`**, elegí el binario en el selector de archivos (escribí la ruta arriba con `tab`; `~` funciona) y decidí dónde recordarla: **`l`** escribe `./umwl-tui.json` (solo esta carpeta) o **`u`** escribe `~/.config/umwl-tui/config.json` (todas las carpetas de este usuario). El archivo local tiene prioridad sobre el de usuario; ambos contienen solo la ruta, sin secretos, y `umwl-tui.json` está en `.gitignore`. `--workloader <ruta>` en la línea de comandos los pisa a ambos para una sola ejecución. También sirven un symlink (`ln -s ~/tools/workloader workloader`) o una copia del archivo: la fila del chequeo indica cuál encontró.
+
 4. **Prueba de cordura (solo lectura)**: `./workloader pce-list && ./workloader wkld-export --output-file sanity.csv` y mirá los hostnames: ¿es el inventario del tenant esperado? Un export de solo lectura demuestra que la API key funciona antes de escribir nada.
 5. **Otra cuenta u otro PCE**: repetir en una carpeta nueva. Nunca copiar `pce.yaml`. Varios PCE en un mismo `pce.yaml` no es el esquema del kit; si igual existe, pasar siempre `--pce <nombre>`.
 
@@ -138,7 +161,7 @@ O compilarlo (Go 1.24+): `(cd kit && make build) && cp kit/umwl-tui .`. `make di
 
 | Paso | Qué hace | Toca el PCE |
 |---|---|---|
-| 0 Preflight | Localiza workloader (o lo descarga/compila), muestra el PCE (`pce-list`), lo configura con `pce-add --api-key` si hace falta, prueba la conexión, crea `runs/<ts>/`. | Solo lectura |
+| 0 Preflight | Localiza workloader (flag → ruta guardada → `./workloader` → PATH), muestra su versión y arquitectura de CPU, ofrece `b` compilar desde el fuente (nativo), `d` descargar release, `w` usar un binario en otro lugar; muestra el PCE (`pce-list`), lo configura con `pce-add --api-key` si hace falta, prueba la conexión, crea `runs/<ts>/`. | Solo lectura (compilar/descargar escribe solo `./workloader`, `./workloader-src/` y los archivos de configuración) |
 | 1 Load CSV | Columnas obligatorias (`hostname`, `name`, `interfaces`), IPs válidas, IPs repetidas, filtro `--priority`, hostnames o names duplicados (les agrega la IP como sufijo), resumen de valores por etiqueta. | No |
 | 2 PCE inventory | `wkld-export`, `label-export`, `label-dimension-export` a `runs/<ts>/`. Indexa cada workload del PCE por sus IPs (`interfaces` y `public_ip`) y marca los gestionados (`managed` o `ven_href`). | Solo lectura |
 | 3 Labels | Columnas del CSV que no son un tipo de etiqueta del PCE → descartar o salir a crear el tipo. Lista los valores nuevos que se crearán y pide confirmación. | No |
@@ -265,7 +288,10 @@ python3 kit/legacy/reconcile_umwl.py pce-workloads.csv cliente-a-umwl-import.csv
 | Síntoma | Causa y solución |
 |---|---|
 | macOS no deja ejecutar `umwl-tui` o `workloader` ("no se puede abrir porque no se pudo verificar el desarrollador") | Cuarentena de Gatekeeper al descargar. `xattr -d com.apple.quarantine ./umwl-tui` (umwl-tui lo hace con workloader cuando lo descarga). |
-| `workloader` en Apple Silicon | El release de macOS es un binario Intel y corre con Rosetta 2 (`softwareupdate --install-rosetta` si no está instalado). Para un binario nativo: `brew install go`; `umwl-tui --setup-only` ofrece clonar y compilar. |
+| La fila del chequeo dice `amd64 binary on arm64 (runs under emulation/Rosetta 2)` | Tenés el release de macOS upstream, que es solo Intel. Presioná `b` en el preflight para clonar y compilar un binario nativo (requiere `brew install go`), o compilá a mano como en "Compilar workloader a mano". Rosetta sigue funcionando mientras tanto (`softwareupdate --install-rosetta` si falta). |
+| `b` dice `Go toolchain missing` | `brew install go` (el diálogo ofrece ejecutarlo cuando hay Homebrew) o el instalador de go.dev/dl; después `r` y `b` de nuevo. Sin Go: `d` descarga el release. |
+| `go build` falla con `proxy.golang.org … 403` / `Host not in allowlist` | La red filtra el proxy de módulos de Go. Reintentá con `GOPROXY=direct go build …` desde `workloader-src/` (los módulos vienen directo de GitHub), o compilá en una máquina con salida abierta y copiá el archivo: es un único binario estático. |
+| umwl-tui usa un `workloader` distinto del que esperás | Precedencia: `--workloader` → `./umwl-tui.json` → `~/.config/umwl-tui/config.json` → `./workloader` → PATH. La fila del chequeo imprime `[path from …]` cuando lo aportó un archivo de configuración; `w` lo cambia, borrar el archivo lo resetea. |
 | El dry run termina con `the match column cannot be blank` en todas las filas y `nothing to be done` | workloader hace matching por una columna, elegida con `--match` o, sin el flag, por prioridad entre las columnas presentes (href, hostname, name); con la convención de hostname vacío elige `hostname` y descarta todas las filas. umwl-tui y el loader legacy pasan `--match name` en la pasada de creación y `--match href` en la de actualización, y tratan ese dry run como fallido. A mano: `wkld-import to-create.csv --umwl --update=false --match name`. |
 | `pce-add` pide correo y contraseña aunque pasaste `--api-user` | Falta el flag `--api-key`; sin él workloader ignora `--api-user/--api-secret/--org`. umwl-tui lo pasa siempre. |
 | 401/403 al importar; el dry run funciona | La API key hereda el rol del usuario. Creala con un usuario Global Organization Owner o Global Administrator (un Workload Manager con alcance puede crear workloads, pero no etiquetas nuevas ni listas de IP), o usá una service account con esos permisos. Verificá también el `org id`. |
