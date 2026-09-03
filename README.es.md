@@ -268,6 +268,8 @@ O compilarlo (Go 1.24+): `git clone … kit && (cd kit && make build) && cp kit/
 ./umwl-tui --help                                         # --pce, --workloader, --chunk (20 por defecto), --runs (./runs por defecto)
 ```
 
+Sin un CSV como argumento, `umwl-tui` abre un selector de archivos después del preflight (estilo Midnight Commander: ruta editable arriba, carpetas y CSV abajo, `..` para subir, `tab` para escribir una ruta exacta), luego pide el CSV opcional de listas de IP y el filtro de prioridad. Un CSV que no pasa la validación muestra el motivo y vuelve a abrir el selector.
+
 Teclas: `tab` pasa el foco al panel de log (se recorre con las flechas), `?` ayuda, `q` salir (pregunta una vez que empezó el trabajo). En la reconciliación: `u` actualizar el objeto existente, `s` omitir, `c` crear igual, `r` renombrar y actualizar, `U`/`S` aplicar a todas las filas del mismo tipo, `n` siguiente fila sin decidir. En la revisión: `e` editar name/hostname/description/etiquetas, `s` omitir. Un lote fallido abre un modal con reintentar / saltar / abortar.
 
 Todo lo que produjo la corrida queda en `runs/<timestamp>/`: inventarios del PCE antes y después, `to-create.csv`, `to-update.csv`, `skipped.csv`, un CSV y un log de workloader por lote, `report.md` y `report.json` (con cada comando de workloader y su código de salida).

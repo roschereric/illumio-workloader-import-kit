@@ -60,6 +60,7 @@ type model struct {
 	busyWhat      string
 	spin          spinner.Model
 	modal         *Modal
+	picker        *Picker
 	focusLog      bool
 	logLines      []string
 	logView       viewport.Model
@@ -276,9 +277,18 @@ func (m *model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 	}
+	if m.picker != nil {
+		cur := m.picker
+		closeIt, cmd := cur.update(m, msg)
+		if closeIt && m.picker == cur { // the handler may have opened another dialog
+			m.picker = nil
+		}
+		return m, cmd
+	}
 	if m.modal != nil {
-		closeIt, cmd := m.modal.update(m, msg)
-		if closeIt {
+		cur := m.modal
+		closeIt, cmd := cur.update(m, msg)
+		if closeIt && m.modal == cur {
 			m.modal = nil
 		}
 		return m, cmd
@@ -389,6 +399,8 @@ func (m *model) View() string {
 	var main string
 	if m.help {
 		main = m.helpView()
+	} else if m.picker != nil {
+		main = lipgloss.Place(m.mainWidth(), m.mainHeight(), lipgloss.Center, lipgloss.Center, m.picker.view(m.mainWidth(), m.mainHeight()))
 	} else if m.modal != nil {
 		main = lipgloss.Place(m.mainWidth(), m.mainHeight(), lipgloss.Center, lipgloss.Center, m.modal.view(m.mainWidth()))
 	} else {
@@ -483,7 +495,9 @@ func (m *model) sidebar() string {
 
 func (m *model) keyBar() string {
 	var keys []string
-	if m.modal != nil {
+	if m.picker != nil {
+		return " " + sDim.Render("file chooser — keys shown inside the dialog")
+	} else if m.modal != nil {
 		keys = []string{key("esc", "close")}
 	} else if m.focusLog {
 		keys = []string{key("↑↓ pgup pgdn", "scroll log"), key("tab", "back to panel")}

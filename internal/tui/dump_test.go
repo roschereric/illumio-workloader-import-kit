@@ -3,6 +3,8 @@ package tui
 import (
 	"os"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // TestDumpScreens writes screenshots (ANSI) of key steps for manual review when UMWL_DUMP is set.
@@ -43,4 +45,7 @@ func TestDumpScreens(t *testing.T) {
 	save("10-report")
 	m.help = true
 	save("help")
+	m.help = false
+	m.picker = newPicker("Proposed workloads CSV", "Pick the file with one row per IP. Start: the working folder.", "", []string{".csv"}, func(m *model, p string) tea.Cmd { return nil })
+	save("picker")
 }

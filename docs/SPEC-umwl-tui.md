@@ -34,6 +34,7 @@ internal/tui/               Bubble Tea model
   model.go                  Model, Init/Update/View, layout, status bar, sidebar, key bar, help
   steps.go                  one section per step: view, keys, key handler, async commands, result handling (onWork)
   modal.go                  choice / info / form modals (capture all keys while open)
+  picker.go                 Midnight-Commander-style file chooser (path field + listing)
   util.go                   table renderer, cell-width-aware truncate/pad/wrap/clip
   styles.go                 palette (Illumio orange #FF5500, ink #313638, paper #F7F4EE) and glyphs
 testdata/                   mock workloader (python) + example CSVs used by the tests
@@ -79,7 +80,9 @@ Layout (fixed chrome, integer cells): status bar (1 line) · sidebar 28 cols (st
 (height/4, 6..14 lines) · key bar (1 line). Focus toggles with `tab` between the main panel and the log.
 
 Global keys: `tab` focus log · `?` help · `q` quit (confirmation once work started) · `ctrl+c` quit.
-Modals capture every key; `esc` cancels a form or picks the cancel option of a choice.
+Modals capture every key; `esc` cancels a form or picks the cancel option of a choice. A handler may open another dialog from inside a dialog (chained pickers/forms): the caller only clears the dialog it dispatched to.
+
+File chooser (`picker.go`): path field on top (`tab` or `/` to edit; enter on a directory jumps there, on a file selects it; `~` expands), listing below with `..`, directories first, preferred extensions (`.csv`) next and highlighted, other files dimmed; `←`/backspace = parent, enter/`→` = open or select, `esc` = cancel (or "none" for optional pickers). Used when no CSV is given on the command line and after a failed CSV load (which rewinds to step 0 and reopens the chooser).
 
 Per-step keys are listed in the bottom bar and in `stepKeys()`. Tables: `↑↓ j k pgup pgdown g G`.
 

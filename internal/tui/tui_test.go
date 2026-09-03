@@ -218,3 +218,58 @@ func TestViewFitsTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestPickerFlowAndBadCSVRecovery(t *testing.T) {
+	m, dir := setup(t)
+	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	os.WriteFile(filepath.Join(dir, "sub", "broken.csv"), []byte("name,foo\nx,y\n"), 0o644)
+	m.cfg.CSV = ""
+	drain(t, m, m.Init())
+	press(t, m, "enter")
+	if m.picker == nil {
+		t.Fatal("expected the file picker")
+	}
+	v := m.View()
+	for _, want := range []string{"Proposed workloads CSV", "cliente3-umwl-import-v2.csv", "sub/", "path "} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("picker view missing %q:\n%s", want, v)
+		}
+	}
+	// navigate: go to top (..), down into sub/, pick broken.csv → error → recovery reopens the picker
+	press(t, m, "g", "down", "down") // "..", "runs/", "sub/"
+	if p, isDir := m.picker.selected(); !isDir || filepath.Base(p) != "sub" {
+		t.Fatalf("expected sub/ selected, got %s", p)
+	}
+	press(t, m, "enter") // descend
+	if filepath.Base(m.picker.Dir) != "sub" {
+		t.Fatalf("expected to be in sub, in %s", m.picker.Dir)
+	}
+	press(t, m, "enter") // select broken.csv (preselected as first .csv)
+	if m.picker == nil || !m.picker.Optional {
+		t.Fatal("expected the optional IPL picker")
+	}
+	press(t, m, "esc") // no IPL
+	if m.modal == nil || m.modal.Kind != "form" {
+		t.Fatal("expected the priority form")
+	}
+	press(t, m, "enter") // load → fails (missing columns)
+	if m.modal == nil || m.status[stCSV] != "failed" {
+		t.Fatalf("expected failure modal, status=%s", m.status[stCSV])
+	}
+	press(t, m, "enter") // close → back to preflight with the picker open
+	if m.picker == nil || m.step != stPreflight {
+		t.Fatalf("expected picker reopened at preflight, step=%d picker=%v", m.step, m.picker != nil)
+	}
+	// type an exact path in the path field
+	press(t, m, "tab")
+	m.picker.input.SetValue(filepath.Join(dir, "cliente3-umwl-import-v2.csv"))
+	press(t, m, "enter")
+	press(t, m, "esc")   // no IPL
+	press(t, m, "enter") // priority default "1"
+	if m.csv == nil || len(m.csv.Rows) != 42 || m.step != stCSV {
+		t.Fatalf("csv not loaded via typed path: step=%d", m.step)
+	}
+	if m.cfg.CSV != "cliente3-umwl-import-v2.csv" {
+		t.Fatalf("expected relative path, got %q", m.cfg.CSV)
+	}
+}

@@ -268,6 +268,8 @@ Or build it (Go 1.24+): `git clone … kit && (cd kit && make build) && cp kit/u
 ./umwl-tui --help                                         # --pce, --workloader, --chunk (default 20), --runs (default ./runs)
 ```
 
+Without a CSV argument, `umwl-tui` opens a file chooser after the preflight (Midnight Commander style: editable path on top, folders and CSVs below, `..` to go up, `tab` to type an exact path), then asks for the optional IP lists CSV and the priority filter. A CSV that fails validation shows the reason and reopens the chooser.
+
 Keys: `tab` switches focus to the log pane (scroll with the arrows), `?` help, `q` quit (asks once work has started). In the reconcile step: `u` update the existing object, `s` skip, `c` create anyway, `r` rename and update, `U`/`S` apply to every row of the same kind, `n` next undecided row. In the review step: `e` edit name/hostname/description/labels, `s` skip. A failed batch opens a modal with retry / skip / abort.
 
 Everything the run produced is in `runs/<timestamp>/`: PCE inventories before and after, `to-create.csv`, `to-update.csv`, `skipped.csv`, one CSV and one workloader log per batch, `report.md` and `report.json` (including every workloader command with its exit code).

@@ -157,14 +157,7 @@ func (m *model) preflightKey(k string) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if m.cfg.CSV == "" {
-			m.modal = formModal("Proposed workloads CSV", []string{"Path relative to the working folder."}, []Field{
-				{Key: "csv", Label: "Workloads CSV"}, {Key: "ipl", Label: "IP lists CSV (opt.)"}, {Key: "prio", Label: "Priority filter", Default: m.cfg.Priority},
-			}, func(m *model, v map[string]string) tea.Cmd {
-				m.cfg.CSV, m.cfg.IPL, m.cfg.Priority = v["csv"], v["ipl"], v["prio"]
-				m.report.CSV, m.report.IPL = v["csv"], v["ipl"]
-				return m.loadCSV()
-			})
-			return m, nil
+			return m, m.openCSVPicker()
 		}
 		return m, m.loadCSV()
 	}
@@ -242,11 +235,8 @@ func (m *model) csvKey(k string) (tea.Model, tea.Cmd) {
 	case "end", "G":
 		m.cur = 1 << 30
 	case "o":
-		m.cfg.CSV = ""
-		m.step = stPreflight
-		m.status[stCSV] = "pending"
-		m.status[stPreflight] = "active"
-		return m.preflightKey("enter")
+		m.backToPreflight()
+		return m, m.openCSVPicker()
 	case "enter":
 		if m.csv == nil || len(m.csv.Rows) == 0 {
 			return m, nil
@@ -1033,7 +1023,13 @@ func (m *model) onWork(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case csvDoneMsg:
 		m.idle()
 		if msg.err != nil {
-			m.fail("CSV: " + msg.err.Error())
+			m.status[stCSV] = "failed"
+			m.appendLog(sErr.Render("✖ ") + "CSV: " + msg.err.Error())
+			m.modal = infoModal("Could not load the CSV", []string{m.cfg.CSV, msg.err.Error(), "", "Close this dialog to choose another file."})
+			m.modal.OnClose = func(m *model) tea.Cmd {
+				m.backToPreflight()
+				return m.openCSVPicker()
+			}
 			return m, nil
 		}
 		m.csv = msg.cf
@@ -1155,4 +1151,38 @@ func pceSummary(listing string) string {
 		return firstLine(listing)
 	}
 	return best
+}
+
+// backToPreflight rewinds from a failed/abandoned CSV load so another file can be chosen.
+func (m *model) backToPreflight() {
+	m.cfg.CSV = ""
+	m.csv = nil
+	m.step = stPreflight
+	m.status[stCSV] = "pending"
+	m.status[stPreflight] = "active"
+	m.cur, m.top = 0, 0
+}
+
+// openCSVPicker chains: workloads CSV → IP lists CSV (optional) → priority → load.
+func (m *model) openCSVPicker() tea.Cmd {
+	m.picker = newPicker("Proposed workloads CSV", "Pick the file with one row per IP (hostname,name,interfaces,description,<labels>...). Start: the working folder.", "", []string{".csv"},
+		func(m *model, path string) tea.Cmd {
+			m.cfg.CSV = path
+			m.report.CSV = path
+			ipl := newPicker("IP lists CSV (optional)", "workloader ipl-import format (name,description,include,exclude,fqdns). esc = no IP lists.", filepath.Dir(path), []string{".csv"},
+				func(m *model, p2 string) tea.Cmd {
+					m.cfg.IPL = p2
+					m.report.IPL = p2
+					m.modal = formModal("Priority filter", []string{"Only rows whose description carries [.. P<n> ..] for these priorities (e.g. 1 or 1,2). Leave empty to load every row."},
+						[]Field{{Key: "prio", Label: "Priority filter", Default: m.cfg.Priority}}, func(m *model, v map[string]string) tea.Cmd {
+							m.cfg.Priority = v["prio"]
+							return m.loadCSV()
+						})
+					return nil
+				})
+			ipl.Optional = true
+			m.picker = ipl
+			return nil
+		})
+	return nil
 }
