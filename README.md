@@ -2,7 +2,7 @@ Español: [README.es.md](README.es.md)
 
 # illumio-workloader-import-kit
 
-Kit to load into an Illumio PCE the **unmanaged workloads (UMWL)** and **IP lists** that come out of an Explorer flow analysis, using [workloader](https://github.com/brian1917/workloader) as the import engine. It includes an interactive Python TUI that reconciles by IP against the PCE inventory before writing anything, a minimal non-interactive script, the sample CSVs from a proof of concept and an explanatory PDF guide with diagrams (in Spanish and in English).
+Kit to load into an Illumio PCE the **unmanaged workloads (UMWL)** and **IP lists** that come out of an Explorer flow analysis, using [workloader](https://github.com/brian1917/workloader) as the import engine. It includes `umwl-tui`, a full-screen terminal application (Go) that reconciles by IP against the PCE inventory before writing anything, its plain-terminal Python predecessor, a minimal non-interactive script, the sample CSVs from a proof of concept and an explanatory PDF guide with diagrams (in Spanish and in English).
 
 > Verified against **workloader v12.1.9** (release of June 12, 2025; code on `master` consulted on September 3, 2026) and **Illumio Core 24.x/25.x** (documentation at `product-docs-repo.illumio.com`). The command names, flags and CSV headers in this README were taken from the workloader source code (`cmd/root.go`, `cmd/wkldimport`, `cmd/iplimport`, `cmd/wkldexport`, `cmd/pcemgmt/addpce.go`, `cmd/labeldimension`, `cmd/traffic`). If you use another version, confirm with `./workloader <command> --help`.
 
@@ -48,7 +48,8 @@ Before every run, the TUI executes `workloader pce-list` and shows you the PCE i
 
 | File | What it is |
 |---|---|
-| `umwl_loader.py` | Interactive TUI (Python 3, standard library only). Installs or verifies workloader, configures the PCE, validates the CSV, reconciles by IP, runs a dry run, imports in batches with a progress bar, verifies and leaves a report. Every step that touches the PCE asks for confirmation. |
+| `umwl-tui` (`cmd/`, `internal/`, `Makefile`) | **The full-screen application (Go, Bubble Tea)**: status bar, step list, per-step panel, live workloader output and key bar; modals for every decision; batches with progress and retry/skip; report per run. Single static binary for macOS (arm64/amd64) and Linux. See the section below and `docs/SPEC-umwl-tui.md`. |
+| `umwl_loader.py` | Plain-terminal version (Python 3, standard library only) of the same flow, kept as fallback. Installs or verifies workloader, configures the PCE, validates the CSV, reconciles by IP, runs a dry run, imports in batches with a progress bar, verifies and leaves a report. |
 | `reconcile_umwl.py` | Minimal, non-interactive version of the IP reconciliation step: from a `wkld-export` and the proposed CSV it generates `-to-create.csv`, `-existing.csv`, `-conflicts.csv` and a text report. It does not write to the PCE. |
 | `examples/*-umwl-import.csv` | Proposed unmanaged workload CSVs (one row per IP) for three groups of a proof of concept. They are **POC examples**: they contain the customer's lab IPs and serve as a format template, not for loading as-is. |
 | `examples/cliente3-umwl-import-v2.csv` | **Recommended format** from now on: labels with the `R_/A_/E_/L_` prefix, `name` = descriptive role + IP, empty `hostname`, `interfaces` = `eth0:<ip>`, report comment in `description`. |
@@ -186,6 +187,8 @@ Expected result. The scripts run from the working folder as `python3 kit/umwl_lo
 
 ### c. workloader and pce.yaml with the TUI
 
+(With the Go application: `./umwl-tui --setup-only` does the same step 0 — see the umwl-tui section.)
+
 ```bash
 python3 kit/umwl_loader.py --setup-only
 ```
@@ -218,6 +221,58 @@ The reviewed CSVs from the report go into the working folder, named after the cu
 | Several PCEs in the same `pce.yaml` | Not the kit's scheme. If it exists anyway, always pass `--pce <name>` to `umwl_loader.py`; the TUI shows `pce-list` and asks whether it is the right PCE before going on. |
 
 ---
+
+## umwl-tui: the full-screen application
+
+`umwl-tui` is the same ten-step flow as `umwl_loader.py`, rebuilt as a real terminal application (htop / Midnight Commander style): a status bar with the PCE, the run folder and the step counter; the list of steps with their state on the left; the active step's panel on the right (tables you browse with the arrow keys, side-by-side "proposed vs. in the PCE" detail, progress bars); the live workloader output at the bottom; and a key bar that changes per step. Every decision that matters (conflicts, writes to the PCE, failed batches) is a modal; nothing is written before the "Write to the PCE?" confirmation after the dry run.
+
+```
+  umwl-tui  ● Ready                          PCE default (pce.yaml)  │  run 20260903-042451  │  step 4/10
+╭──────────────────────────╮╭────────────────────────────────────────────────────────────────────────────╮
+│ STEPS                    ││ ■ Reconcile by IP — 42 rows · 3 awaiting a decision                        │
+│ ✔  0 Preflight           ││   IP                PROPOSED NAME            STATE               IN THE PCE│
+│ ✔  1 Load CSV            ││ ▶ 10.43.43.21       Zabbix Server 10.43.43…  EXISTS-UNMANAGED    zbx-old   │
+│ ✔  2 PCE inventory       ││   10.52.144.143     Zabbix Proxy OCI 10.52…  NEW                           │
+│ ✔  3 Labels              ││   192.168.161.105   DNS Corporativo 192.16…  CONFLICT-MULTIPLE   dns1      │
+│ ▶  4 Reconcile by IP     ││   …                                                                        │
+│ ○  5 Review new          ││ ■ Selected: 10.43.43.21                                                    │
+│ ○  6 Dry run             ││ proposed                            in the PCE · unmanaged                 │
+│ ○  7 Execute             ││   name      Zabbix Server 10.43.43.21   name      Zabbix Server            │
+│ ○  8 Verify              ││   role      R_Monitoring                role      —                        │
+│ ○  9 IP lists            ││   app       A_Observability             app       —                        │
+│ ○ 10 Report              ││                                                                            │
+│ EVENTS                   │╰────────────────────────────────────────────────────────────────────────────╯
+│ 04:24 reconcile: 39 NEW… │╭─ workloader output · tab to scroll ────────────────────────────────────────╮
+╰──────────────────────────╯│ 04:24:51 $ workloader wkld-export --output-file runs/…/pce-workloads.csv   │
+ u update  s skip  c create anyway  r rename+update  U/S all of this kind  enter next  tab log  ? help  q quit
+```
+
+### Install
+
+Prebuilt binaries are attached to the GitHub releases (`umwl-tui-darwin-arm64`, `umwl-tui-darwin-amd64`, `umwl-tui-linux-amd64`, `umwl-tui-linux-arm64`, plus `SHA256SUMS`). On a Mac:
+
+```bash
+cd ~/illumio/<account>/<pce>                       # the working folder (see "Initializing the working folder")
+gh release download --repo roschereric/illumio-workloader-import-kit --pattern 'umwl-tui-darwin-arm64' --pattern SHA256SUMS
+shasum -a 256 -c SHA256SUMS --ignore-missing
+mv umwl-tui-darwin-arm64 umwl-tui && chmod +x umwl-tui && xattr -d com.apple.quarantine umwl-tui
+```
+
+Or build it (Go 1.24+): `git clone … kit && (cd kit && make build) && cp kit/umwl-tui .`. `make dist` cross-compiles every platform into `dist/` with checksums.
+
+### Use
+
+```bash
+./umwl-tui --setup-only                                   # step 0 only: workloader, pce.yaml (pce-add --api-key), connection test
+./umwl-tui customer-a-umwl-import.csv --ipl customer-a-ipl-import.csv --priority 1
+./umwl-tui --help                                         # --pce, --workloader, --chunk (default 20), --runs (default ./runs)
+```
+
+Keys: `tab` switches focus to the log pane (scroll with the arrows), `?` help, `q` quit (asks once work has started). In the reconcile step: `u` update the existing object, `s` skip, `c` create anyway, `r` rename and update, `U`/`S` apply to every row of the same kind, `n` next undecided row. In the review step: `e` edit name/hostname/description/labels, `s` skip. A failed batch opens a modal with retry / skip / abort.
+
+Everything the run produced is in `runs/<timestamp>/`: PCE inventories before and after, `to-create.csv`, `to-update.csv`, `skipped.csv`, one CSV and one workloader log per batch, `report.md` and `report.json` (including every workloader command with its exit code).
+
+Design and development notes: `docs/SPEC-umwl-tui.md` (state machine, UI contract, engine/workloader contract, security requirements and tests, backlog) and `CLAUDE.md` (build/test/release commands and conventions for Claude Code sessions).
 
 ## How to use it
 

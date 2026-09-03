@@ -24,3 +24,10 @@ __pycache__/
 *.pyc
 .DS_Store
 *.zip
+
+# Go build outputs / sandbox module files / screenshot dumps
+/umwl-tui
+dist/
+go.sandbox.mod
+go.sandbox.sum
+*.ans
