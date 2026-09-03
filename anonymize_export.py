@@ -8,8 +8,9 @@ anonymize_export.py — consistent, reversible pseudonymization of an Illumio Ex
     python3 anonymize_export.py deanon  proposed-umwl-import.csv -o proposed-umwl-import.real.csv --map anon-map.json
 
 What is replaced (same input → same token, across every column and every run that shares the map file):
-  - hostnames / FQDN / names in the Source|Destination Name, Hostname, FQDN columns → host-0001.company.com style
-    (the domain part is mapped to company.com / dept.company.com so tiers stay recognizable)
+  - hostnames / FQDN / names in the Source|Destination Name, Hostname, FQDN columns of a traffic export, and in the
+    hostname / name columns of a workloader wkld-export (descriptions get known names replaced inside the text)
+    → host-0001.company.com style (the domain part is mapped to company.com / dept.company.com so tiers stay recognizable)
   - customer names given with --customer (case-insensitive, whole words) → "Cliente"
   - domains given with --domain (and their sub-domains) → company.com, dept.company.com
   - usernames (Consuming Username, Username) → user-01 …, except well-known service accounts (root, oracle, zabbix,
@@ -25,7 +26,9 @@ real hostnames/FQDNs in its descriptions before it is loaded into the PCE.
 """
 import argparse, csv, ipaddress, json, os, re, sys
 
-HOST_COLS = ["Source Name", "Source Hostname", "Source FQDN", "Destination Name", "Destination Hostname", "Destination FQDN"]
+# Traffic export columns, plus the workloader wkld-export / label-export columns so the PCE inventories can be shared too.
+HOST_COLS = ["Source Name", "Source Hostname", "Source FQDN", "Destination Name", "Destination Hostname", "Destination FQDN",
+             "hostname", "name", "description"]
 USER_COLS = ["Consuming Username", "Username"]
 KEEP_USERS = {"root", "oracle", "zabbix", "nobody", "www-data", "apache", "nginx", "postgres", "mysql", "splunk", "daemon",
               "systemd-network", "systemd-resolve", "_apt", "sshd", "ntp", "chrony", "nagios", "tomcat", "weblogic", "grid",
@@ -92,7 +95,20 @@ class Mapper:
         if low in self.m["hosts"]:
             return self.m["hosts"][low]
         short, _, dom = low.partition(".")
-        token = self._next("hosts", low, lambda n: f"host-{n:04d}")
+        if dom and anon_domains is not None and not any(dom == d or dom.endswith("." + d) for d in anon_domains):
+            return v  # third-party FQDN (vendor SaaS, cloud endpoints): evidence, keep as is
+        # the same machine may appear as short name and as FQDN: reuse the token prefix
+        prefix = None
+        for real, tok in self.m["hosts"].items():
+            if real == short or real.split(".")[0] == short:
+                prefix = tok.split(".")[0]
+                break
+        if prefix:
+            token = prefix
+            self.m["hosts"][low] = token
+            self.dirty = True
+        else:
+            token = self._next("hosts", low, lambda n: f"host-{n:04d}")
         if dom:
             if anon_domains is None or any(dom == d or dom.endswith("." + d) for d in anon_domains):
                 token = token + "." + self.domain(dom)
@@ -100,6 +116,16 @@ class Mapper:
                 token = token + "." + dom
             self.m["hosts"][low] = token
         return token
+
+    def text(self, value, anon_domains):
+        """Replace already-mapped hostnames and (optionally) domains inside free text."""
+        out = value
+        for real, tok in sorted(self.m["hosts"].items(), key=lambda kv: -len(kv[0])):
+            out = re.sub(r"(?i)\b" + re.escape(real) + r"\b", tok, out)
+        for real, tok in sorted(self.m["domains"].items(), key=lambda kv: -len(kv[0])):
+            if anon_domains is None or real in anon_domains or any(real.endswith("." + d) for d in anon_domains):
+                out = re.sub(r"(?i)\b" + re.escape(real) + r"\b", tok, out)
+        return out
 
     def user(self, value):
         v = value.strip()
@@ -150,7 +176,11 @@ def anon(args):
     for r in rows:
         for c in HOST_COLS:
             if c in r and r[c]:
-                new = mp.host(r[c], doms)
+                if c == "description" or (c == "name" and (" " in r[c] or is_ip_literal(r[c].split()[-1]))):
+                    # free text / "Role IP" names: replace known hostnames and domains inside, never tokenise the whole cell
+                    new = mp.text(r[c], doms)
+                else:
+                    new = mp.host(r[c], doms)
                 if new != r[c]:
                     stats["hosts"] += 1
                 r[c] = new

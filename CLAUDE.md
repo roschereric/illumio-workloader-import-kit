@@ -7,11 +7,12 @@ Working notes for Claude Code (and humans) developing this repository.
 Tools to load the unmanaged workloads and IP lists proposed by an Illumio flow analysis into a PCE, on top of
 `brian1917/workloader`:
 
-- `umwl-tui` (Go, Bubble Tea) — the full-screen application. Source in `cmd/umwl-tui` and `internal/`.
-- `umwl_loader.py` — the earlier plain-terminal version (Python stdlib). Kept as the fallback and as the reference
-  for behaviour; new features go to `umwl-tui` first.
-- `reconcile_umwl.py` — non-interactive IP reconciliation.
-- `examples/` — CSVs from real POCs (customer IPs; templates only). `docs/` — Illumio-branded guides (ES/EN), `SPEC-umwl-tui.md`.
+- `umwl-tui` (Go, Bubble Tea) — **the product**: the full-screen application. Source in `cmd/umwl-tui` and `internal/`.
+- `anonymize_export.py` — pseudonymize exports before the AI analysis / restore names in the proposals (stdlib).
+- `legacy/umwl_loader.py`, `legacy/reconcile_umwl.py` — the earlier plain-terminal implementation (Python stdlib),
+  kept as fallback and readable reference; new features go to `umwl-tui` first and are back-ported only if cheap.
+- `examples/` — CSVs from real POCs (customer IPs; templates only). `docs/` — the merged guide (ES/EN, branded PDF +
+  HTML), `SPEC-umwl-tui.md`, `prompts/` (Claude Project instructions + per-conversation prompt), `img/` schematics.
 
 Read `docs/SPEC-umwl-tui.md` before changing `umwl-tui`: it is the contract (state machine, UI, engine, security).
 
@@ -29,7 +30,7 @@ UMWL_DUMP=/tmp/shots go test ./internal/tui -run TestDumpScreens   # ANSI screen
 Release: bump the tag, `make dist`, `gh release create vX.Y.Z dist/* --title vX.Y.Z --notes "..."`. Binaries are
 never committed (`dist/` is gitignored). macOS users must `xattr -d com.apple.quarantine umwl-tui` after download.
 
-Python side: `python3 -m py_compile umwl_loader.py reconcile_umwl.py`; run against the mock: copy
+Python side: `python3 -m py_compile legacy/umwl_loader.py legacy/reconcile_umwl.py anonymize_export.py`; run the loader against the mock: copy
 `testdata/mock-workloader.py` to `./workloader` in a temp folder with a CSV and an empty-ish `pce.yaml`.
 
 ## Conventions
