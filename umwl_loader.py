@@ -178,15 +178,21 @@ def ensure_pce(wl):
     """Make sure pce.yaml has a PCE; otherwise guide through pce-add (API key)."""
     cfg = os.environ.get("ILLUMIO_CONFIG") or "./pce.yaml"
     p, _ = wl.run(["pce-list"], "pce-list.log", check=False)
-    have = p.returncode == 0 and os.path.exists(cfg) and os.path.getsize(cfg) > 0
+    none_msg = "no pce configured" in (p.stdout + p.stderr).lower()   # workloader prints this with rc=0 when pce.yaml has no entries
+    have = p.returncode == 0 and os.path.exists(cfg) and os.path.getsize(cfg) > 0 and not none_msg
+    if none_msg: warn("workloader no tiene ningún PCE configurado en esta carpeta: vamos directo a pce-add")
     if have and ask("¿Es este el PCE correcto?", {"s": "sí, continuar", "a": "agregar/cambiar PCE (pce-add)", "q": "salir"}, "s") == "s": return
-    if have is False: warn(f"no hay PCE configurado ({cfg} ausente o vacío). workloader lee ./pce.yaml, $ILLUMIO_CONFIG o --config-file")
+    if not have and not none_msg: warn(f"no hay PCE configurado ({cfg} ausente o vacío). workloader lee ./pce.yaml, $ILLUMIO_CONFIG o --config-file")
     print(wrap("Necesitás un API key del PCE: en la consola, menú de usuario → My API Keys → Add. Guardá 'Authentication Username' (api_…) "
-               "y 'Secret'. Para SaaS, el org id es el número que aparece en la URL (…/orgs/<id>/…) y el FQDN es el host de la consola; puerto 443."))
-    ch = ask("¿Cómo lo configuramos?", {"k": "ingresar los datos acá (API key)", "i": "correr 'workloader pce-add' interactivo", "q": "salir"}, "k")
+               "y 'Secret'. Para SaaS, el org id es el número que aparece en la URL (…/orgs/<id>/…) y el FQDN es el host de la consola; puerto 443. "
+               "El kit siempre usa pce-add --api-key: nunca pide email/contraseña."))
+    ch = ask("¿Cómo lo configuramos?", {"k": "ingresar los datos acá (API key)", "i": "correr 'workloader pce-add --api-key' interactivo", "q": "salir"}, "k")
     if ch == "q": sys.exit(0)
     if ch == "i":
-        subprocess.run([wl.bin, "pce-add"])
+        # always --api-key: without it workloader asks email/password and tries to log in via login.illum.io
+        # (fails with 401 for SSO users). With it, it prompts: API Authentication Username, API Secret, Org.
+        p = subprocess.run([wl.bin, "pce-add", "--api-key"])
+        if p.returncode != 0: err("pce-add falló"); sys.exit(1)
     else:
         import getpass
         name = ask_text("nombre corto del PCE", "poc"); fqdn = ask_text("FQDN del PCE", "xxx.illum.io"); port = ask_text("puerto", "443")

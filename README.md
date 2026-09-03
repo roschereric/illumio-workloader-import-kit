@@ -1,325 +1,412 @@
+Español: [README.es.md](README.es.md)
+
 # illumio-workloader-import-kit
 
-Kit para cargar en un PCE de Illumio los **workloads no gestionados (UMWL)** y las **listas de IP** que salen de un análisis de flujos de Explorer, usando [workloader](https://github.com/brian1917/workloader) como motor de importación. Incluye una TUI interactiva en Python que reconcilia por IP contra el inventario del PCE antes de escribir nada, un script mínimo no interactivo, los CSV de ejemplo de una prueba de concepto y una guía explicativa en PDF con diagramas.
+Kit to load into an Illumio PCE the **unmanaged workloads (UMWL)** and **IP lists** that come out of an Explorer flow analysis, using [workloader](https://github.com/brian1917/workloader) as the import engine. It includes an interactive Python TUI that reconciles by IP against the PCE inventory before writing anything, a minimal non-interactive script, the sample CSVs from a proof of concept and an explanatory PDF guide with diagrams (in Spanish and in English).
 
-> Verificado contra **workloader v12.1.9** (release del 12 de junio de 2025; código en `master` consultado el 3 de septiembre de 2026) e **Illumio Core 24.x/25.x** (documentación en `product-docs-repo.illumio.com`). Los nombres de comandos, flags y cabeceras CSV de este README se tomaron del código fuente de workloader (`cmd/root.go`, `cmd/wkldimport`, `cmd/iplimport`, `cmd/wkldexport`, `cmd/pcemgmt/addpce.go`, `cmd/labeldimension`, `cmd/traffic`). Si usás otra versión, confirmá con `./workloader <comando> --help`.
+> Verified against **workloader v12.1.9** (release of June 12, 2025; code on `master` consulted on September 3, 2026) and **Illumio Core 24.x/25.x** (documentation at `product-docs-repo.illumio.com`). The command names, flags and CSV headers in this README were taken from the workloader source code (`cmd/root.go`, `cmd/wkldimport`, `cmd/iplimport`, `cmd/wkldexport`, `cmd/pcemgmt/addpce.go`, `cmd/labeldimension`, `cmd/traffic`). If you use another version, confirm with `./workloader <command> --help`.
 
 ---
 
-## Importante: una carpeta por PCE / cuenta de Illumio
+## Important: one working folder per Illumio account (organization) + PCE
 
-workloader resuelve la conexión al PCE leyendo, en este orden, `--config-file`, la variable `ILLUMIO_CONFIG` y, si no hay ninguna, **`./pce.yaml` en la carpeta de trabajo**. El kit, además, escribe en la carpeta de trabajo `runs/<timestamp>/` con el inventario exportado del PCE, los CSV finales y los logs de cada lote.
+workloader resolves the PCE connection by reading, in this order, `--config-file`, the `ILLUMIO_CONFIG` variable and, if neither is set, **`./pce.yaml` in the working folder**. The kit also writes `runs/<timestamp>/` in the working folder, with the inventory exported from the PCE, the final CSVs and the logs of every batch.
 
-Si en una misma carpeta conviven `pce.yaml` de dos clientes (o un `pce.yaml` con varios PCE y te olvidás del `--pce`), el riesgo es concreto: **importar los objetos de un cliente en el PCE de otro**. La regla es simple: **una carpeta por PCE**, con su propio `pce.yaml`, sus CSV y sus `runs/`.
+The isolation unit is neither "the customer" nor "the PCE" but each **Illumio account or organization + PCE** combination, that is, each distinct `pce.yaml` profile (FQDN, port, org id and API key):
 
-Estructura sugerida:
+- An account can have several PCEs (SaaS and on-prem, production and DR, regions): each one is a folder.
+- A SaaS PCE (one FQDN) hosts several organizations; each `org id` is a separate tenant and gets its own folder, even when the FQDN is the same. The `org id` is the number that appears in the console URL (`…/orgs/<id>/…`).
+- Another account: same layout, never the same `pce.yaml`.
+
+If the `pce.yaml` files of two tenants share a folder (or a `pce.yaml` holds several PCEs and you forget `--pce`), the risk is concrete: **importing one customer's objects into another customer's PCE or organization**. The rule is simple: **one working folder per account + PCE**, with its own `pce.yaml`, its CSVs and its `runs/`. Suggested naming: `~/illumio/<account>/<pce-or-org>/`.
+
+Suggested layout:
 
 ```
 ~/illumio/
-├── workloader                     # binario (o clon compilado) compartido, opcional
-├── cliente-a/
-│   ├── workloader -> ../workloader   # symlink, o una copia del binario
-│   ├── pce.yaml                      # SOLO el PCE de cliente-a
-│   ├── umwl_loader.py
-│   ├── reconcile_umwl.py
-│   ├── cliente-a-umwl-import.csv
-│   ├── cliente-a-ipl-import.csv
-│   └── runs/
-│       └── 20260903-101500/
-└── cliente-b/
-    ├── workloader -> ../workloader
-    ├── pce.yaml                      # SOLO el PCE de cliente-b
-    ├── umwl_loader.py
-    └── ...
+├── customer-a/
+│   ├── scp57-org12/                  # account customer-a, SaaS PCE scp57, org 12
+│   │   ├── kit/                      # clone of this repository
+│   │   ├── workloader                # binary (or a symlink to a shared one)
+│   │   ├── pce.yaml                  # ONLY this account + PCE
+│   │   ├── customer-a-umwl-import.csv
+│   │   ├── customer-a-ipl-import.csv
+│   │   └── runs/
+│   │       └── 20260903-101500/
+│   └── onprem-prod/                  # same account, another PCE: another folder, another pce.yaml
+│       ├── kit/  workloader  pce.yaml  ...
+└── customer-b/
+    └── <pce-or-org>/                 # another account, same layout
+        ├── kit/  workloader  pce.yaml  ...
 ```
 
-Antes de cada corrida, la TUI ejecuta `workloader pce-list` y te muestra el PCE que va a usar; leé ese nombre y el FQDN antes de aceptar. Si el `pce.yaml` tiene más de un PCE, pasá siempre `--pce <nombre>`.
+Before every run, the TUI executes `workloader pce-list` and shows you the PCE it is going to use; read that name and the FQDN before accepting. If the `pce.yaml` has more than one PCE, always pass `--pce <name>`. workloader supports several profiles in a single `pce.yaml` (with `default_pce_name` and the `--pce` flag), but the kit deliberately does not rely on that: a forgotten `--pce` or a wrong default would load the objects into the wrong tenant.
 
 ---
 
-## Contenido del repositorio
+## Repository contents
 
-| Archivo | Qué es |
+| File | What it is |
 |---|---|
-| `umwl_loader.py` | TUI interactiva (Python 3, solo biblioteca estándar). Instala o verifica workloader, configura el PCE, valida el CSV, reconcilia por IP, hace dry run, importa en lotes con barra de progreso, verifica y deja un reporte. Todo paso que toca el PCE pide confirmación. |
-| `reconcile_umwl.py` | Versión mínima y no interactiva del paso de reconciliación por IP: a partir de un `wkld-export` y del CSV propuesto genera `-to-create.csv`, `-existing.csv`, `-conflicts.csv` y un reporte de texto. No escribe en el PCE. |
-| `examples/*-umwl-import.csv` | CSV de workloads no gestionados propuestos (una fila por IP) de tres grupos de una prueba de concepto. Son **ejemplos de POC**: contienen IPs de laboratorio del cliente y sirven como plantilla de formato, no para cargar tal cual. |
-| `examples/cliente3-umwl-import-v2.csv` | **Formato recomendado** a partir de ahora: etiquetas con prefijo `R_/A_/E_/L_`, `name` = rol descriptivo + IP, `hostname` vacío, `interfaces` = `eth0:<ip>`, comentario del informe en `description`. |
-| `examples/*-ipl-import.csv` | Listas de IP propuestas en el formato de `workloader ipl-import`. `cliente3-ipl-import-v2.csv` usa la convención `IPL_<Sitio>_<Uso>`. |
-| `docs/Guia-workloader-import-kit.pdf` | Guía explicativa con diagramas (flujo completo, requisitos, pasos de la TUI, relación kit/workloader, mapeo CSV → objetos del PCE). También en `docs/Guia-workloader-import-kit.html` (archivo único, se abre con doble clic). |
-| `.gitignore` | Excluye `workloader` (binario), `workloader/` (clon), `pce.yaml`, `*.log`, `runs/`, zips. **Nunca subas `pce.yaml`: contiene la API key.** |
+| `umwl_loader.py` | Interactive TUI (Python 3, standard library only). Installs or verifies workloader, configures the PCE, validates the CSV, reconciles by IP, runs a dry run, imports in batches with a progress bar, verifies and leaves a report. Every step that touches the PCE asks for confirmation. |
+| `reconcile_umwl.py` | Minimal, non-interactive version of the IP reconciliation step: from a `wkld-export` and the proposed CSV it generates `-to-create.csv`, `-existing.csv`, `-conflicts.csv` and a text report. It does not write to the PCE. |
+| `examples/*-umwl-import.csv` | Proposed unmanaged workload CSVs (one row per IP) for three groups of a proof of concept. They are **POC examples**: they contain the customer's lab IPs and serve as a format template, not for loading as-is. |
+| `examples/cliente3-umwl-import-v2.csv` | **Recommended format** from now on: labels with the `R_/A_/E_/L_` prefix, `name` = descriptive role + IP, empty `hostname`, `interfaces` = `eth0:<ip>`, report comment in `description`. |
+| `examples/*-ipl-import.csv` | Proposed IP lists in the `workloader ipl-import` format. `cliente3-ipl-import-v2.csv` uses the `IPL_<Site>_<Use>` convention. |
+| `docs/Guia-workloader-import-kit.pdf` | Explanatory guide in Spanish with diagrams (end-to-end flow, requirements and one folder per account + PCE, initialization, TUI steps, kit/workloader relationship, CSV → PCE object mapping, troubleshooting). Also as `docs/Guia-workloader-import-kit.html` (single file, opens with a double click). |
+| `docs/Guide-workloader-import-kit-EN.pdf` | The same guide in English. Also as `docs/Guide-workloader-import-kit-EN.html`. |
+| `.gitignore` | Excludes `workloader` (binary), `workloader/` (clone), `pce.yaml`, `*.log`, `runs/`, zips. **Never push `pce.yaml`: it contains the API key.** |
 
-Cambio respecto de la versión original del kit: en `umwl_loader.py` la llamada no interactiva a `pce-add` ahora incluye el flag `--api-key`. Sin ese flag, workloader ignora `--api-user/--api-secret/--org` y pide correo y contraseña (verificado en `cmd/pcemgmt/addpce.go`).
+Changes from the original version of the kit:
 
----
-
-## Requisitos
-
-- **macOS** (probado en Apple Silicon; el flujo es el mismo en Intel y en Linux).
-- **Python 3.9 o superior**, solo biblioteca estándar (no hay `pip install`).
-- **workloader v12.x**. No requiere instalación: es un binario. El release de macOS se publica como `mac-<versión>.zip`; en Apple Silicon corre vía Rosetta 2. Si preferís un binario nativo, **Go** (`brew install go`) y `go build` desde el clon del repositorio; la TUI ofrece ambas opciones.
-- Una **API key del PCE con permisos de escritura**. La key hereda el rol del usuario que la crea: si el usuario es de solo lectura, `wkld-import --update-pce` falla. Para crearla: menú de usuario (arriba a la derecha) → **My API Keys** → **Add**; guardá el **Authentication Username** (`api_…`) y el **Secret**, que solo se muestran una vez. También sirve una service account con permisos equivalentes.
-- **Acceso de red al PCE por HTTPS** (puerto 443 en SaaS, 8443 típico on-prem) desde la Mac. En SaaS el `org id` es el número que aparece en la URL de la consola (`…/orgs/<id>/…`).
+- In `umwl_loader.py` both PCE setup paths (`[k]` enter the values in the TUI, `[i]` run workloader's own prompts) call `pce-add --api-key`, so workloader asks for API Authentication Username / API Secret / Org and never for email and password. Without that flag, workloader ignores `--api-user/--api-secret/--org` and asks for email and password (verified in `cmd/pcemgmt/addpce.go`).
+- The TUI detects the "no pce configured" message that `workloader pce-list` prints (with exit code 0) when `pce.yaml` exists but has no entries, and goes straight to `pce-add` instead of asking whether that is the right PCE.
 
 ---
 
-## Paso a paso: extraer los flujos desde Explorer
+## Requirements
 
-El insumo del análisis es el CSV de tráfico del PCE. El nombre de la vista cambió entre generaciones de consola: en las consolas 22.x–23.x se llama **Explorer**; en las consolas 24.x/25.x los mismos datos están en la vista **Traffic** (tabla) dentro de la categoría **Explore** del menú izquierdo, junto a **Map**. La mecánica es la misma:
+- **macOS** (tested on Apple Silicon; the flow is the same on Intel and on Linux).
+- **Python 3.9 or later**, standard library only (there is no `pip install`).
+- **workloader v12.x**. No installation required: it is a binary. The macOS release is published as `mac-<version>.zip`; on Apple Silicon it runs through Rosetta 2. If you prefer a native binary, **Go** (`brew install go`) and `go build` from the repository clone; the TUI offers both options.
+- A **PCE API key with write permissions**. The key inherits the role of the user who creates it: if the user is read-only, `wkld-import --update-pce` fails. To create it: user menu (top right) → **My API Keys** → **Add**; save the **Authentication Username** (`api_…`) and the **Secret**, which are shown only once. A service account with equivalent permissions also works.
+- **Network access to the PCE over HTTPS** (port 443 on SaaS, typically 8443 on-prem) from the Mac. On SaaS the `org id` is the number that appears in the console URL (`…/orgs/<id>/…`).
 
-1. Abrí la consola del PCE y entrá a la vista **Explorer / Traffic**.
-2. **Ventana de tiempo**: elegí un rango (último día, semana, mes o un rango personalizado). Para inferir roles con confianza conviene una ventana de al menos 7 días que incluya un fin de semana y, si existen, ventanas de respaldo y de escaneo.
-3. **Filtros**: en *Source* (consumer) y *Destination* (provider) podés incluir o excluir workloads, IPs y etiquetas; en *Service*, puertos, protocolos y procesos. Para una prueba de concepto lo habitual es incluir en Source **o** Destination los workloads con VEN (o su etiqueta de aplicación) y dejar el otro lado abierto, con el operador "or" entre ambos lados para capturar entrada y salida.
-4. **Límite de resultados**: el número máximo de filas del export lo fija la consulta. La consola muestra hasta 10.000 conexiones por página y hasta 100.000 resultados en pantalla; el CSV descargado puede llegar a 200.000 en un PCE standalone. **El export que analizamos venía con exactamente 5.000 filas**, que era el tope configurado en esa consulta, y un solo escaneo de puertos ocupaba el 93 % de ellas. Antes de exportar subí el límite al máximo que permita la consola y, si aun así se llena, **dividí la consulta por aplicación/grupo de workloads y por ventanas de tiempo más cortas**, y excluí el origen del escáner. Un export exactamente en el tope es un export truncado.
-5. Ejecutá la consulta (**Run**). Si la consulta es asíncrona, aparece después en **Load Results** (arriba a la derecha); desde ahí se abre y se exporta.
-6. **Export** → CSV. Guardá el archivo con un nombre que incluya cliente, alcance y fechas (por ejemplo `cliente-a_grupo1_2026-08-17_2026-09-01.csv`).
-7. **Abrí el CSV como texto** (editor, `head`, Python, pandas). Si lo abrís en Excel, importalo con el asistente marcando las columnas de IP como **Texto**: Excel interpreta `10.0.4.10` como número o fecha y reconstruir las IPs después es trabajo perdido. Lo mismo con las columnas de fecha: en exports previos llegaron mezclados dos formatos.
+---
 
-Columnas del export (consola 24.x/25.x; una columna por tipo de etiqueta): `Source IP`, `Source Name`, `Source Hostname`, `Source Enforcement`, `Source App/Env/Loc/Role` (y cualquier tipo adicional), `Source FQDN`, las mismas para `Destination *`, `Port`, `Protocol`, `Process`, `Username`, `Num Flows`, `Bytes In`, `Bytes Out`, `Connection State`, `Reported Policy Decision`, `Reported by`, `First Detected`, `Last Detected`. Las columnas de etiquetas de origen y destino son las que permiten separar tráfico entre workloads gestionados del tráfico hacia IPs sin VEN.
+## Step by step: extracting the flows from Explorer
 
-### Alternativas al export manual
+The input of the analysis is the PCE traffic CSV. The name of the view changed between console generations: in 22.x–23.x consoles it is called **Explorer**; in 24.x/25.x consoles the same data is in the **Traffic** view (table) under the **Explore** category of the left menu, next to **Map**. The mechanics are the same:
 
-- **API REST asíncrona** (la misma que usa la consola): `POST /api/v2/orgs/<org>/traffic_flows/async_queries` con `query_name`, `sources`, `destinations`, `services`, `policy_decisions`, `start_date`, `end_date` y `max_results` (límite 200.000); después `GET …/traffic_flows/async_queries/<uuid>` para el estado y `GET …/traffic_flows_async/queries/<uuid>/download` para el resultado. El endpoint síncrono `traffic_flows/traffic_analysis_queries` está obsoleto.
-- **workloader**: el comando actual es `workloader traffic` ("Export traffic data"). Flags relevantes: `--start` / `--end` (`yyyy-mm-dd` o `yyyy-mm-ddTHH:mm:ss`, en GMT; por defecto 88 días atrás y mañana), `--max-results` (por defecto 100.000, máximo 200.000), `--incl-src-file` / `--excl-src-file` / `--incl-dst-file` / `--excl-dst-file` (archivos con hrefs de etiquetas, listas de IP o workloads, que se obtienen con `label-export`, `ipl-export`, `wkld-export`), `--incl-svc-file` / `--excl-svc-file`, `--excl-allowed` / `--excl-potentially-blocked` / `--excl-blocked`, `--output-file`. El comando `explorer` sigue registrado pero como paquete `legacy-explorer`; usá `traffic`.
+1. Open the PCE console and go to the **Explorer / Traffic** view.
+2. **Time window**: pick a range (last day, week, month or a custom range). To infer roles with confidence, a window of at least 7 days that includes a weekend and, if they exist, backup and scanning windows is advisable.
+3. **Filters**: in *Source* (consumer) and *Destination* (provider) you can include or exclude workloads, IPs and labels; in *Service*, ports, protocols and processes. For a proof of concept the usual approach is to include in Source **or** Destination the workloads with a VEN (or their application label) and leave the other side open, with the "or" operator between both sides to capture inbound and outbound.
+4. **Result limit**: the maximum number of rows in the export is set by the query. The console shows up to 10,000 connections per page and up to 100,000 results on screen; the downloaded CSV can reach 200,000 on a standalone PCE. **The export we analyzed came with exactly 5,000 rows**, which was the limit configured in that query, and a single port scan took up 93 % of them. Before exporting, raise the limit to the maximum the console allows and, if it still fills up, **split the query by application/workload group and by shorter time windows**, and exclude the scanner source. An export exactly at the limit is a truncated export.
+5. Run the query (**Run**). If the query is asynchronous, it appears later under **Load Results** (top right); from there it can be opened and exported.
+6. **Export** → CSV. Save the file with a name that includes customer, scope and dates (for example `customer-a_group1_2026-08-17_2026-09-01.csv`).
+7. **Open the CSV as text** (editor, `head`, Python, pandas). If you open it in Excel, import it with the wizard marking the IP columns as **Text**: Excel interprets `10.0.4.10` as a number or a date and rebuilding the IPs afterwards is wasted work. The same goes for the date columns: in previous exports two formats arrived mixed.
+
+Export columns (24.x/25.x console; one column per label type): `Source IP`, `Source Name`, `Source Hostname`, `Source Enforcement`, `Source App/Env/Loc/Role` (and any additional type), `Source FQDN`, the same for `Destination *`, `Port`, `Protocol`, `Process`, `Username`, `Num Flows`, `Bytes In`, `Bytes Out`, `Connection State`, `Reported Policy Decision`, `Reported by`, `First Detected`, `Last Detected`. The source and destination label columns are what allow separating traffic between managed workloads from traffic to IPs without a VEN.
+
+### Alternatives to the manual export
+
+- **Asynchronous REST API** (the same one the console uses): `POST /api/v2/orgs/<org>/traffic_flows/async_queries` with `query_name`, `sources`, `destinations`, `services`, `policy_decisions`, `start_date`, `end_date` and `max_results` (limit 200,000); then `GET …/traffic_flows/async_queries/<uuid>` for the status and `GET …/traffic_flows_async/queries/<uuid>/download` for the result. The synchronous endpoint `traffic_flows/traffic_analysis_queries` is deprecated.
+- **workloader**: the current command is `workloader traffic` ("Export traffic data"). Relevant flags: `--start` / `--end` (`yyyy-mm-dd` or `yyyy-mm-ddTHH:mm:ss`, in GMT; default 88 days back and tomorrow), `--max-results` (default 100,000, maximum 200,000), `--incl-src-file` / `--excl-src-file` / `--incl-dst-file` / `--excl-dst-file` (files with hrefs of labels, IP lists or workloads, obtained with `label-export`, `ipl-export`, `wkld-export`), `--incl-svc-file` / `--excl-svc-file`, `--excl-allowed` / `--excl-potentially-blocked` / `--excl-blocked`, `--output-file`. The `explorer` command is still registered but as the `legacy-explorer` package; use `traffic`.
 
   ```bash
-  ./workloader traffic --start 2026-08-17 --end 2026-09-01 --max-results 200000 --output-file flujos.csv
+  ./workloader traffic --start 2026-08-17 --end 2026-09-01 --max-results 200000 --output-file flows.csv
   ```
 
-  Las columnas del CSV de `workloader traffic` no son idénticas a las del export de la consola; el prompt de análisis (más abajo) pide normalizar nombres de columna, así que cualquiera de los dos sirve.
+  The columns of the `workloader traffic` CSV are not identical to those of the console export; the analysis prompt (below) asks to normalize column names, so either one works.
 
 ---
 
-## Objetos de política: qué crea el kit y por qué
+## Policy objects: what the kit creates and why
 
-- **Workloads no gestionados (UMWL).** Entidades de red sin VEN que se dan de alta en el PCE para poder escribir reglas sobre ellas; la política entre un workload con VEN y uno no gestionado se aplica con las reglas del lado que tiene VEN. El criterio del análisis: **un peer se modela como UMWL cuando es un servidor concreto con rol identificable** (resolutores DNS, NTP internos, servidor y proxies Zabbix, indexadores Splunk, NetBackup master/media, bases de datos, balanceadores o front-ends, bastiones, escáneres de vulnerabilidades, relays SMTP, IBM MQ, OEM). Se crea **uno por IP**, con etiquetas, y aparece en las reglas de ringfence como cualquier otro workload. En la consola equivale a *Workloads → Add → Add Unmanaged Workload*.
-- **Listas de IP (IP lists).** Colecciones estáticas de direcciones, rangos y FQDN. Se usan para **peers amplios o que no son servidores**: VLAN de usuarios, subredes completas de una aplicación, metadata de nube (`169.254.169.254`, que en OCI es además el resolver de la VCN), NTP público, consolas SaaS de EDR, rangos publicados por un proveedor. También conviven con los UMWL como atajo: una lista `ipl-oracle-db` permite escribir hoy la regla "app → Oracle 1521" y migrarla a etiquetas después.
-- **Etiquetas y tipos de etiqueta.** Los cuatro tipos por defecto son Role, Application, Environment y Location (RAEL); el PCE admite tipos adicionales (por ejemplo `os`). Al escribir reglas, Illumio aplica OR entre valores del mismo tipo y AND entre tipos distintos. **workloader crea valores de etiqueta que no existen, pero no crea tipos**: si el CSV trae una columna que no es un tipo del PCE, `wkld-import` la ignora en silencio (la TUI lo detecta en el paso 3 y ofrece descartarla o salir para crear el tipo con `label-dimension-import`).
-- **Servicios.** Objetos de puerto/protocolo (`svc-dns`, `svc-app-8080`). El informe los propone, pero **el kit no los crea**; se cargan con `workloader svc-import` o desde la consola cuando se escriben las reglas.
+- **Unmanaged workloads (UMWL).** Network entities without a VEN that are registered in the PCE so that rules can be written about them; policy between a workload with a VEN and an unmanaged one is enforced by the rules on the side that has the VEN. The analysis criterion: **a peer is modeled as a UMWL when it is a specific server with an identifiable role** (DNS resolvers, internal NTP, Zabbix server and proxies, Splunk indexers, NetBackup master/media, databases, load balancers or front-ends, bastions, vulnerability scanners, SMTP relays, IBM MQ, OEM). **One per IP** is created, with labels, and it appears in the ringfence rules like any other workload. In the console it is the equivalent of *Workloads → Add → Add Unmanaged Workload*.
+- **IP lists.** Static collections of addresses, ranges and FQDNs. They are used for **broad peers or peers that are not servers**: user VLANs, whole application subnets, cloud metadata (`169.254.169.254`, which in OCI is also the VCN resolver), public NTP, EDR SaaS consoles, ranges published by a provider. They also coexist with the UMWLs as a shortcut: an `ipl-oracle-db` list lets you write the "app → Oracle 1521" rule today and migrate it to labels later.
+- **Labels and label types.** The four default types are Role, Application, Environment and Location (RAEL); the PCE supports additional types (for example `os`). When writing rules, Illumio applies OR between values of the same type and AND between different types. **workloader creates label values that do not exist, but does not create types**: if the CSV brings a column that is not a PCE type, `wkld-import` silently ignores it (the TUI detects it in step 3 and offers to discard it or exit to create the type with `label-dimension-import`).
+- **Services.** Port/protocol objects (`svc-dns`, `svc-app-8080`). The report proposes them, but **the kit does not create them**; they are loaded with `workloader svc-import` or from the console when the rules are written.
 
-### Convención de nomenclatura
+### Naming convention
 
-| Campo | Convención | Ejemplo |
+| Field | Convention | Example |
 |---|---|---|
-| Etiquetas | Prefijo por tipo: `R_<Rol>`, `A_<App>`, `E_<Entorno>`, `L_<Ubicación>` | `R_DNS`, `A_CoreInfra`, `E_Prod`, `L_OCI` |
-| `name` | `<rol descriptivo> <IP>`; es lo que se ve en la consola y lo que hace única a cada fila | `Zabbix Server 10.43.43.21` |
-| `hostname` | **Vacío**. Los FQDN de los exports pueden estar anonimizados o ser inventados; un hostname falso confunde más de lo que ayuda. workloader identifica la fila por `name` cuando no hay hostname. | |
-| `interfaces` | `eth0:<ip>` (la consola lo muestra como *eth0: 10.1.1.1*); varias interfaces separadas por `;` | `eth0:10.43.43.21` |
-| `description` | Comentario del análisis con el prefijo `[<grupo> P<prioridad> conf:<Alta\|Media\|Baja>]`; la prioridad es la que filtra `--priority` | `[C3 P1 conf:Alta] Servidor Zabbix: consulta 10050/TCP…` |
-| `review` | Columna de trabajo (PENDING, NEW, EXISTS-UNMANAGED…); workloader la ignora | |
+| Labels | Prefix by type: `R_<Role>`, `A_<App>`, `E_<Environment>`, `L_<Location>` | `R_DNS`, `A_CoreInfra`, `E_Prod`, `L_OCI` |
+| `name` | `<descriptive role> <IP>`; it is what the console shows and what makes each row unique | `Zabbix Server 10.43.43.21` |
+| `hostname` | **Empty**. The FQDNs in the exports may be anonymized or invented; a fake hostname confuses more than it helps. workloader identifies the row by `name` when there is no hostname. | |
+| `interfaces` | `eth0:<ip>` (the console shows it as *eth0: 10.1.1.1*); several interfaces separated by `;` | `eth0:10.43.43.21` |
+| `description` | Analysis comment with the prefix `[<group> P<priority> conf:<Alta\|Media\|Baja>]`; the priority is what `--priority` filters on | `[C3 P1 conf:Alta] Servidor Zabbix: consulta 10050/TCP…` |
+| `review` | Working column (PENDING, NEW, EXISTS-UNMANAGED…); workloader ignores it | |
 
 ---
 
-## Contrato CSV de workloader
+## workloader CSV contract
 
 ### `wkld-import` (workloads)
 
-Cabeceras reconocidas (el resto se ignora): `href`, `hostname`, `name`, `interfaces`, `public_ip`, `distinguished_name`, `spn`, `enforcement`, `visibility`, `description`, `os_id`, `os_detail`, `data_center`, `external_data_set`, `external_data_reference` y **una columna por tipo de etiqueta** (`role`, `app`, `env`, `loc`, y los tipos personalizados que existan en el PCE).
+Recognized headers (everything else is ignored): `href`, `hostname`, `name`, `interfaces`, `public_ip`, `distinguished_name`, `spn`, `enforcement`, `visibility`, `description`, `os_id`, `os_detail`, `data_center`, `external_data_set`, `external_data_reference` and **one column per label type** (`role`, `app`, `env`, `loc`, and any custom types that exist in the PCE).
 
 ```
 hostname,name,interfaces,description,role,app,env,loc,review
 ,Zabbix Server 10.43.43.21,eth0:10.43.43.21,[C3 P1 conf:Alta] Servidor Zabbix…,R_Monitoring,A_Observability,E_Prod,L_CDLV,PENDING
 ```
 
-- `interfaces`: `192.168.200.20`, `192.168.200.20/24`, `eth0:192.168.200.20` o `eth0:192.168.200.20/24`, separados por `;`.
-- **Matching**: workloader busca el workload existente por `href` si viene, si no por `hostname`, si no por `name` (`--match` permite forzar `href|hostname|name|external_data`). **Nunca por IP.** Por eso dos filas con el mismo `name` y sin hostname se tratan como el mismo workload (la TUI les agrega la IP como sufijo), y por eso existe la reconciliación por IP: sin ella, un UMWL que ya existe con otro nombre se crea duplicado.
-- `--umwl`: crea workloads no gestionados cuando el host no existe (se desactiva si se hace match por href). `--update` (por defecto `true`): actualiza los existentes; `--update=false` solo crea. `--allow-enforcement-changes`: necesario para tocar `enforcement`/`visibility`. `--max-create` / `--max-update`: tope de seguridad (-1 = sin límite).
-- Sin `--update-pce`, el comando es un **dry run**: no escribe nada y deja en `workloader.log` (o en `--log-file`) qué crearía y qué cambiaría. Con `--update-pce` pide confirmación; con `--update-pce --no-prompt` no la pide (automatización).
+- `interfaces`: `192.168.200.20`, `192.168.200.20/24`, `eth0:192.168.200.20` or `eth0:192.168.200.20/24`, separated by `;`.
+- **Matching**: workloader looks for the existing workload by `href` if present, else by `hostname`, else by `name` (`--match` allows forcing `href|hostname|name|external_data`). **Never by IP.** That is why two rows with the same `name` and no hostname are treated as the same workload (the TUI appends the IP as a suffix), and why the IP reconciliation exists: without it, a UMWL that already exists under another name is created as a duplicate.
+- `--umwl`: creates unmanaged workloads when the host does not exist (disabled when matching by href). `--update` (default `true`): updates existing ones; `--update=false` only creates. `--allow-enforcement-changes`: required to touch `enforcement`/`visibility`. `--max-create` / `--max-update`: safety cap (-1 = no limit).
+- Without `--update-pce`, the command is a **dry run**: it writes nothing and leaves in `workloader.log` (or in `--log-file`) what it would create and what it would change. With `--update-pce` it asks for confirmation; with `--update-pce --no-prompt` it does not (automation).
 
-### `ipl-import` (listas de IP)
+### `ipl-import` (IP lists)
 
 ```
 name,description,include,exclude,fqdns
-ipl-dns-corp,Resolutores corporativos,192.168.161.92;192.168.161.104;192.168.161.105,,
-ipl-oci-metadata,Resolver de la VCN y metadata de OCI,169.254.169.254/32,,
+ipl-dns-corp,Corporate resolvers,192.168.161.92;192.168.161.104;192.168.161.105,,
+ipl-oci-metadata,OCI VCN resolver and metadata,169.254.169.254/32,,
 ```
 
-- `include` / `exclude`: IPs, CIDR o rangos separados por `;`. `fqdns` para nombres.
-- Matching por `href` y, si no hay, por `name`: si el nombre existe, actualiza; si no, crea. `--ignore-href` para reutilizar un export de otro PCE. `--provision` (`-p`) provisiona después de crear/actualizar.
-- Igual que arriba: sin `--update-pce` es dry run.
+- `include` / `exclude`: IPs, CIDRs or ranges separated by `;`. `fqdns` for names.
+- Matching by `href` and, if absent, by `name`: if the name exists, it updates; if not, it creates. `--ignore-href` to reuse an export from another PCE. `--provision` (`-p`) provisions after creating/updating.
+- Same as above: without `--update-pce` it is a dry run.
 
 ---
 
-## Cómo se usa
+## Initializing the working folder
 
-### 1. Preparar la carpeta del cliente
+These steps are done once per account + PCE combination. They leave a folder with the kit clone, the workloader binary and a tested `pce.yaml`; after that, every load is a single command. The kit repository is private: a GitHub session (`gh auth login` or an SSH key loaded into the account) is needed before cloning.
 
-```bash
-mkdir -p ~/illumio/cliente-a && cd ~/illumio/cliente-a
-cp <ruta-del-repo>/umwl_loader.py <ruta-del-repo>/reconcile_umwl.py .
-# copiá acá los CSV propuestos para ESTE cliente
-python3 umwl_loader.py --setup-only
-```
-
-`--setup-only` busca `./workloader` (o `--workloader <ruta>`, o el PATH). Si no lo encuentra ofrece descargar el último release (`curl` + `unzip`, quita la cuarentena de Gatekeeper) o clonar y compilar con Go. Después corre `pce-list`; si no hay `pce.yaml` guía el `pce-add` con la API key y prueba la conexión con un `label-dimension-export`.
-
-### 2. Cargar
+### a. Working folder for this account + PCE
 
 ```bash
-python3 umwl_loader.py cliente-a-umwl-import.csv --ipl cliente-a-ipl-import.csv --priority 1
+mkdir -p ~/illumio/customer-a/scp57-org12 && cd ~/illumio/customer-a/scp57-org12
 ```
 
-Flags de `umwl_loader.py`:
+The folder is the isolation unit; everything that follows runs with that folder as the current directory.
 
-| Flag | Significado |
+### b. The kit inside the folder (private repository)
+
+```bash
+gh auth login                                   # once; or an SSH key loaded into GitHub
+git clone https://github.com/roschereric/illumio-workloader-import-kit.git kit
+# equivalent: gh repo clone roschereric/illumio-workloader-import-kit kit
+# without git: on GitHub, Code → Download ZIP, and unpack it as kit/
+```
+
+Expected result. The scripts run from the working folder as `python3 kit/umwl_loader.py …`: the current directory is the working folder, so `./workloader`, `./pce.yaml` and `./runs` sit next to the CSVs and not inside the clone. The CSVs live in the working folder, not in `kit/`; `kit/examples/` contains templates only. Running inside the clone itself also works (its `.gitignore` excludes `pce.yaml`, the binary and `runs/`), at the cost of tying that clone to a single account + PCE.
+
+```
+~/illumio/customer-a/scp57-org12/
+  kit/                      # repository clone; update with: git -C kit pull
+  workloader                # binary; the TUI downloads it (or a symlink to a shared one)
+  pce.yaml                  # ONLY this account + PCE; created by pce-add; never copy it
+  customer-a-umwl-import.csv
+  customer-a-ipl-import.csv
+  runs/                     # one subfolder per run
+```
+
+### c. workloader and pce.yaml with the TUI
+
+```bash
+python3 kit/umwl_loader.py --setup-only
+```
+
+The TUI looks for `./workloader` (then the PATH, or the `--workloader` path). If it does not find it, it offers to download the release (`mac-<version>.zip`, with `curl` + `unzip` and `xattr -d com.apple.quarantine`) or to clone the workloader repository into `workloader-src/` and build it with `go build`. Then it runs `pce-list`; if there is no `pce.yaml`, or workloader replies "no pce configured", it goes straight to `pce-add`: it asks for a short name, FQDN, port, API user, API secret and org id, runs `pce-add --api-key …` with those values, shows `pce-list` again and tests the connection with a `label-dimension-export`.
+
+### d. Sanity check (read-only)
+
+```bash
+./workloader pce-list
+./workloader wkld-export --output-file sanity.csv
+# look at the hostnames in sanity.csv: is this the inventory of the expected tenant?
+```
+
+Before writing anything, a read-only export proves that the API key works and that the inventory belongs to the expected tenant.
+
+### e. Reviewed CSVs and first load
+
+```bash
+cp ~/Downloads/customer-a-umwl-import.csv ~/Downloads/customer-a-ipl-import.csv .
+python3 kit/umwl_loader.py customer-a-umwl-import.csv --ipl customer-a-ipl-import.csv --priority 1
+```
+
+The reviewed CSVs from the report go into the working folder, named after the customer. The TUI walks through steps 0 to 10 (see "How to use it"); it writes to the PCE only after the dry-run confirmation.
+
+| Situation | What to do |
 |---|---|
-| `csv` | CSV de workloads propuestos, una fila por IP (formato `wkld-import`). |
-| `--setup-only` | Solo instalar/verificar workloader y la conexión al PCE; no carga nada. |
-| `--ipl <csv>` | CSV de listas de IP (formato `ipl-import`) para el paso 9. |
-| `--pce <nombre>` | Nombre del PCE en `pce.yaml` (se pasa como `--pce` a workloader). Obligatorio si `pce.yaml` tiene más de un PCE. |
-| `--priority 1` o `1,2` | Cargar solo las filas cuyo `description` empiece con `[.. P<n> ..]` para esas prioridades. |
-| `--workloader <ruta>` | Ruta al binario (por defecto `./workloader`, después el PATH). |
-| `--chunk 20` | Filas por llamada a `wkld-import`. Granularidad del progreso y radio de impacto de un error. |
-| `--runs ./runs` | Carpeta donde se crea `runs/<timestamp>/`. |
+| f. Another account or another PCE | Repeat a–d in a new folder. Never copy `pce.yaml`. If you prefer a single kit clone, share it through a symlink: `ln -s ~/illumio/kit-shared kit`. |
+| g. Updating the kit | `git -C kit pull` (or download the zip again). The loader has no other dependencies: there is nothing else to install. |
+| Several PCEs in the same `pce.yaml` | Not the kit's scheme. If it exists anyway, always pass `--pce <name>` to `umwl_loader.py`; the TUI shows `pce-list` and asks whether it is the right PCE before going on. |
 
-Qué hace cada paso de la TUI:
+---
 
-| Paso | Qué hace | Toca el PCE |
-|---|---|---|
-| 0 Preflight | Localiza workloader, muestra el PCE (`pce-list`), crea `runs/<ts>/`. | No |
-| 1 Validar CSV | Columnas obligatorias (`hostname`, `name`, `interfaces`), IPs válidas, IPs repetidas, filtro `--priority`, hostnames o names duplicados (les agrega la IP como sufijo), resumen de valores por etiqueta. | No |
-| 2 Inventario | `wkld-export`, `label-export`, `label-dimension-export` a `runs/<ts>/`. Indexa cada workload del PCE por sus IPs (`interfaces` y `public_ip`) y marca los gestionados (`managed` o `ven_href`). | Solo lectura |
-| 3 Etiquetas | Columnas del CSV que no son un tipo de etiqueta del PCE → descartar o salir a crear el tipo. Lista los valores nuevos que se crearán y pide confirmación. | No |
-| 4 Reconciliar por IP | Cada fila se clasifica: **NEW** (la IP no existe), **EXISTS-UNMANAGED** (la IP pertenece a un UMWL: por defecto se actualizan etiquetas/descripción del existente, por `href`), **CONFLICT-MANAGED** (la IP pertenece a un workload con VEN: por defecto se omite), **CONFLICT-MULTIPLE** (varios workloads comparten la IP). Para cada existente/conflicto: actualizar, omitir, crear igual, renombrar, o aplicar la decisión a todos los del mismo tipo. | No |
-| 5 Revisar NEW | Tabla de los nuevos; aceptar todos o revisar uno por uno editando name/hostname/description/etiquetas. Escribe `to-create.csv`, `to-update.csv`, `skipped.csv`. | No |
-| 6 Dry run | `wkld-import to-create.csv --umwl --update=false` y `wkld-import to-update.csv`, sin `--update-pce`; muestra las líneas relevantes del log de workloader. Pide confirmación explícita antes de seguir. | No |
-| 7 Ejecutar | Divide en lotes de `--chunk` filas y corre `wkld-import … --update-pce --no-prompt` por lote con barra de progreso; ante error: reintentar, saltar el lote o abortar. | **Sí** |
-| 8 Verificar | Nuevo `wkld-export` y confirma que cada IP creada aparece como workload. | Solo lectura |
-| 9 Listas de IP | Con `--ipl`: dry run de `ipl-import`, confirmación, `ipl-import … --update-pce --no-prompt`. | **Sí** |
-| 10 Reporte | `runs/<ts>/report.md` y `report.json`: creados, actualizados, omitidos, lotes fallidos, etiquetas creadas, verificación y todos los comandos ejecutados con su código de salida. | No |
+## How to use it
 
-### 3. Sin la TUI (comandos workloader equivalentes)
+### 1. Prepare the working folder
+
+Always from the working folder of the account + PCE (see "Initializing the working folder"):
 
 ```bash
-./workloader pce-add --api-key --name cliente-a --fqdn pce.cliente-a.example --port 443 \
+cd ~/illumio/customer-a/scp57-org12
+# copy here the CSVs proposed for THIS tenant (not inside kit/)
+python3 kit/umwl_loader.py --setup-only
+```
+
+`--setup-only` looks for `./workloader` (or `--workloader <path>`, or the PATH). If it does not find it, it offers to download the latest release (`curl` + `unzip`, removes the Gatekeeper quarantine) or to clone and build with Go. Then it runs `pce-list`; if there is no `pce.yaml` (or workloader replies "no pce configured") it guides the `pce-add` with the API key and tests the connection with a `label-dimension-export`.
+
+### 2. Load
+
+```bash
+python3 kit/umwl_loader.py customer-a-umwl-import.csv --ipl customer-a-ipl-import.csv --priority 1
+```
+
+`umwl_loader.py` flags:
+
+| Flag | Meaning |
+|---|---|
+| `csv` | CSV of proposed workloads, one row per IP (`wkld-import` format). |
+| `--setup-only` | Only install/verify workloader and the PCE connection; loads nothing. |
+| `--ipl <csv>` | IP list CSV (`ipl-import` format) for step 9. |
+| `--pce <name>` | PCE name in `pce.yaml` (passed as `--pce` to workloader). Required if `pce.yaml` has more than one PCE (not the recommended scheme: one folder per account + PCE). |
+| `--priority 1` or `1,2` | Load only the rows whose `description` starts with `[.. P<n> ..]` for those priorities. |
+| `--workloader <path>` | Path to the binary (default `./workloader`, then the PATH). |
+| `--chunk 20` | Rows per `wkld-import` call. Progress granularity and blast radius of an error. |
+| `--runs ./runs` | Folder where `runs/<timestamp>/` is created. |
+
+What each TUI step does:
+
+| Step | What it does | Touches the PCE |
+|---|---|---|
+| 0 Preflight | Locates workloader, shows the PCE (`pce-list`), creates `runs/<ts>/`. | No |
+| 1 Validate CSV | Required columns (`hostname`, `name`, `interfaces`), valid IPs, repeated IPs, `--priority` filter, duplicate hostnames or names (appends the IP as a suffix), summary of values per label. | No |
+| 2 Inventory | `wkld-export`, `label-export`, `label-dimension-export` into `runs/<ts>/`. Indexes every PCE workload by its IPs (`interfaces` and `public_ip`) and marks the managed ones (`managed` or `ven_href`). | Read-only |
+| 3 Labels | CSV columns that are not a PCE label type → discard or exit to create the type. Lists the new values that will be created and asks for confirmation. | No |
+| 4 Reconcile by IP | Each row is classified: **NEW** (the IP does not exist), **EXISTS-UNMANAGED** (the IP belongs to a UMWL: by default the labels/description of the existing one are updated, by `href`), **CONFLICT-MANAGED** (the IP belongs to a workload with a VEN: skipped by default), **CONFLICT-MULTIPLE** (several workloads share the IP). For each existing/conflict: update, skip, create anyway, rename, or apply the decision to all of the same kind. | No |
+| 5 Review NEW | Table of the new ones; accept all or review one by one editing name/hostname/description/labels. Writes `to-create.csv`, `to-update.csv`, `skipped.csv`. | No |
+| 6 Dry run | `wkld-import to-create.csv --umwl --update=false` and `wkld-import to-update.csv`, without `--update-pce`; shows the relevant lines of the workloader log. Asks for explicit confirmation before going on. | No |
+| 7 Run | Splits into batches of `--chunk` rows and runs `wkld-import … --update-pce --no-prompt` per batch with a progress bar; on error: retry, skip the batch or abort. | **Yes** |
+| 8 Verify | New `wkld-export` and confirms that every created IP appears as a workload. | Read-only |
+| 9 IP lists | With `--ipl`: `ipl-import` dry run, confirmation, `ipl-import … --update-pce --no-prompt`. | **Yes** |
+| 10 Report | `runs/<ts>/report.md` and `report.json`: created, updated, skipped, failed batches, labels created, verification and every command executed with its exit code. | No |
+
+### 3. Without the TUI (equivalent workloader commands)
+
+Same working folder, same `pce.yaml`:
+
+```bash
+./workloader pce-add --api-key --name customer-a --fqdn pce.customer-a.example --port 443 \
     --api-user api_xxxxxxxx --api-secret '…' --org 1 --disable-tls-verification false
 ./workloader pce-list
-./workloader wkld-export --output-file pce-workloads.csv           # inventario
-python3 reconcile_umwl.py pce-workloads.csv cliente-a-umwl-import.csv
-./workloader wkld-import cliente-a-umwl-import-to-create.csv --umwl  # dry run -> workloader.log
-./workloader wkld-import cliente-a-umwl-import-to-create.csv --umwl --update-pce
-./workloader wkld-import cliente-a-umwl-import-existing.csv          # solo etiquetas/descr., match por href
-./workloader ipl-import cliente-a-ipl-import.csv                      # dry run
-./workloader ipl-import cliente-a-ipl-import.csv --update-pce
+./workloader wkld-export --output-file pce-workloads.csv           # inventory
+python3 kit/reconcile_umwl.py pce-workloads.csv customer-a-umwl-import.csv
+./workloader wkld-import customer-a-umwl-import-to-create.csv --umwl  # dry run -> workloader.log
+./workloader wkld-import customer-a-umwl-import-to-create.csv --umwl --update-pce
+./workloader wkld-import customer-a-umwl-import-existing.csv          # labels/description only, match by href
+./workloader ipl-import customer-a-ipl-import.csv                      # dry run
+./workloader ipl-import customer-a-ipl-import.csv --update-pce
 ```
 
-`reconcile_umwl.py` deja junto al CSV propuesto: `-to-create.csv` (IPs que no existen), `-existing.csv` (IPs de UMWL existentes, con `href` y `hostname` reescritos para que `wkld-import` sin `--umwl` solo actualice etiquetas y descripción), `-conflicts.csv` (IPs de workloads con VEN o compartidas: decidir a mano) y `-reconcile-report.txt`.
+`reconcile_umwl.py` leaves next to the proposed CSV: `-to-create.csv` (IPs that do not exist), `-existing.csv` (IPs of existing UMWLs, with `href` and `hostname` rewritten so that `wkld-import` without `--umwl` only updates labels and description), `-conflicts.csv` (IPs of workloads with a VEN or shared: decide by hand) and `-reconcile-report.txt`.
 
 ---
 
-## Prompt para replicar el análisis
+## Prompt to replicate the analysis
 
-Este prompt reproduce el trabajo completo (análisis de flujos, informe con marca Illumio y CSV en la nomenclatura del kit) a partir de un export de Explorer/Traffic. Pegalo en Claude con el export adjunto y, si las tenés, capturas de pantalla de las etiquetas existentes en el PCE.
+This prompt reproduces the complete work (flow analysis, Illumio-branded report and CSVs in the kit's naming convention) from an Explorer/Traffic export. Paste it into Claude with the export attached and, if you have them, screenshots of the existing labels in the PCE.
+
+Note: the deliverables the prompt asks for are in Spanish and customer-facing, because that is how this kit is used with LATAM customers. If you need them in another language, change the language in the "Inputs" and "Deliverables" sections.
 
 ````text
-Sos un ingeniero de preventa de Illumio. Te adjunto un export de tráfico del PCE (Explorer / vista Traffic) de una prueba de concepto de microsegmentación y necesito que reproduzcas un análisis completo y sus entregables. Trabajá en español, con lenguaje técnico y directo, sin adjetivos de relleno.
+You are an Illumio pre-sales engineer. I am attaching a PCE traffic export (Explorer / Traffic view) from a microsegmentation proof of concept and I need you to reproduce a complete analysis and its deliverables. Work in Spanish, with direct technical language and no filler adjectives.
 
-## Insumos
-- Export de Explorer/Traffic en CSV o XLSX (adjunto). Puede venir de la consola del PCE o de `workloader traffic`; normalizá los nombres de columna a un esquema común: src_ip, src_name, src_hostname, src_enforcement, src_labels (una por tipo), src_fqdn, dst_* equivalentes, port, proto, process, username, num_flows, bytes_in, bytes_out, connection_state, policy_decision, reported_by, first_detected, last_detected.
-- Opcional: capturas de pantalla de la lista de etiquetas y tipos de etiqueta del PCE, y la lista de workloads con VEN. Si las adjunto, usá exactamente esos nombres de etiqueta; si no, proponé valores nuevos con la nomenclatura de abajo.
-- Contexto que te doy en el mensaje: alcance de la POC (qué hosts tienen VEN, qué grupos), nombre corto del grupo para el prefijo de prioridad (por ejemplo G1, G2, C3) y cualquier dato de red conocido (VLAN de usuarios, rangos de nube, sitios).
+## Inputs
+- Explorer/Traffic export as CSV or XLSX (attached). It may come from the PCE console or from `workloader traffic`; normalize the column names to a common schema: src_ip, src_name, src_hostname, src_enforcement, src_labels (one per type), src_fqdn, the equivalent dst_*, port, proto, process, username, num_flows, bytes_in, bytes_out, connection_state, policy_decision, reported_by, first_detected, last_detected.
+- Optional: screenshots of the PCE label and label type list, and of the list of workloads with a VEN. If I attach them, use exactly those label names; if not, propose new values with the naming convention below.
+- Context I give you in the message: POC scope (which hosts have a VEN, which groups), short group name for the priority prefix (for example G1, G2, C3) and any known network data (user VLANs, cloud ranges, sites).
 
-## Normalización (hacela antes de analizar y documentá qué encontraste)
-1. IPs mutiladas por Excel: celdas numéricas, fechas o notación científica donde debería haber una IP (por ejemplo 10.0.4.10 convertido en 10.004 o en una fecha). Reconstruilas cuando sea inequívoco y marcá las que no; nunca inventes octetos.
-2. Fechas en formatos mezclados (dd/mm/yyyy, mm/dd/yyyy, ISO, con y sin hora): unificá a ISO 8601 y explicá el criterio de desambiguación.
-3. Truncamiento: contá las filas. Si el archivo tiene exactamente el tope de la consulta (5.000, 100.000, 200.000 o cualquier número redondo que coincida con un límite) o si un solo par origen-destino ocupa la mayoría de las filas (un escaneo de puertos, por ejemplo), declaralo como export truncado, cuantificá cuánto ocupa el ruido y recomendá repetir el export con filtros y ventanas más cortas. No afirmes que el tráfico de un host está completo si el export está truncado.
-4. Deduplicá filas idénticas, separá tráfico unicast de broadcast/multicast y descartá lo que no sea IP.
+## Normalization (do it before analyzing and document what you found)
+1. IPs mangled by Excel: numeric cells, dates or scientific notation where an IP should be (for example 10.0.4.10 turned into 10.004 or into a date). Rebuild them when unambiguous and flag the ones that are not; never invent octets.
+2. Dates in mixed formats (dd/mm/yyyy, mm/dd/yyyy, ISO, with and without time): unify to ISO 8601 and explain the disambiguation criterion.
+3. Truncation: count the rows. If the file has exactly the query limit (5,000, 100,000, 200,000 or any round number that matches a limit) or if a single source-destination pair takes up most of the rows (a port scan, for example), declare it a truncated export, quantify how much the noise takes up and recommend repeating the export with filters and shorter windows. Do not claim that a host's traffic is complete if the export is truncated.
+4. Deduplicate identical rows, separate unicast traffic from broadcast/multicast and discard anything that is not IP.
 
-## Criterio de clasificación de cada peer sin VEN
-- WORKLOAD NO GESTIONADO (UMWL): servidor concreto con rol identificable a partir de la evidencia: resolutores DNS, NTP internos, servidores y proxies de monitoreo (Zabbix, Nagios, SolarWinds, OEM), colectores de logs (Splunk, syslog), backup (NetBackup, Veeam, Commvault), bases de datos (Oracle, SQL Server, MySQL, PostgreSQL), balanceadores y front-ends de una aplicación, nodos de clúster, servidores de aplicación, bastiones u orígenes SSH/RDP administrativos, escáneres de vulnerabilidades, relays SMTP, colas de mensajes, controladores de dominio, gestores de agentes (EDR, antivirus). Uno por IP.
-- LISTA DE IP: rangos amplios o peers que no son servidores: VLAN de usuarios y endpoints, subredes completas de una aplicación, metadata de nube (169.254.169.254, que en OCI es además el resolver de la VCN), NTP público, consolas SaaS (EDR, monitoreo), rangos publicados por un proveedor de nube, Internet.
-- Cuando un grupo de IPs comparte rol y aplicación (front-ends, nodos RAC), proponé UMWL por IP con las mismas etiquetas y, además, una lista de IP de conveniencia para escribir la regla hoy y migrar a etiquetas después.
+## Classification criterion for each peer without a VEN
+- UNMANAGED WORKLOAD (UMWL): a specific server with a role identifiable from the evidence: DNS resolvers, internal NTP, monitoring servers and proxies (Zabbix, Nagios, SolarWinds, OEM), log collectors (Splunk, syslog), backup (NetBackup, Veeam, Commvault), databases (Oracle, SQL Server, MySQL, PostgreSQL), load balancers and front-ends of an application, cluster nodes, application servers, bastions or administrative SSH/RDP sources, vulnerability scanners, SMTP relays, message queues, domain controllers, agent managers (EDR, antivirus). One per IP.
+- IP LIST: broad ranges or peers that are not servers: user and endpoint VLANs, whole application subnets, cloud metadata (169.254.169.254, which in OCI is also the VCN resolver), public NTP, SaaS consoles (EDR, monitoring), ranges published by a cloud provider, Internet.
+- When a group of IPs shares role and application (front-ends, RAC nodes), propose a UMWL per IP with the same labels and, in addition, a convenience IP list to write the rule today and migrate to labels later.
 
-## Evidencia (obligatoria en cada inferencia)
-Cada rol asignado a una IP sin VEN es una inferencia. Para cada UMWL y cada lista citá: puertos y protocolo, dirección del flujo (quién consume a quién), proceso y usuario del lado del VEN, cantidad de flujos y bytes, patrón temporal (continuo, horario, puntual) y nivel de confianza Alta / Media / Baja con una frase de razonamiento. Si el rol no se puede sostener con evidencia, ponelo como "(a confirmar)" y asignale prioridad 3.
+## Evidence (mandatory for every inference)
+Every role assigned to an IP without a VEN is an inference. For each UMWL and each list cite: ports and protocol, flow direction (who consumes whom), process and user on the VEN side, number of flows and bytes, time pattern (continuous, scheduled, one-off) and confidence level Alta / Media / Baja with one sentence of reasoning. If the role cannot be supported with evidence, mark it "(a confirmar)" and assign it priority 3.
 
-## Modelo de etiquetas
-Cuatro tipos por defecto (Role, Application, Environment, Location) con prefijo en el valor:
-- R_<Rol>   (R_DNS, R_NTP, R_Monitoring, R_LogCollector, R_Backup, R_Database, R_LoadBalancer, R_AppServer, R_Bastion, R_Scanner, R_Mail, R_Messaging, R_DomainController, R_AgentMgmt)
-- A_<App>   (una por aplicación de negocio, más A_CoreInfra, A_Observability, A_SecurityTools, A_AdminAccess)
-- E_<Env>   (E_Prod, E_QA, E_Dev; si no hay evidencia, E_Prod "a confirmar")
-- L_<Loc>   (sitio o nube: L_DC1, L_OCI, L_AWS, L_Azure, L_GCP)
-Si el PCE ya tiene una convención (capturas adjuntas), respetala. Explicá que la etiqueta de Application es la que sostiene el ringfence y que Illumio aplica OR dentro de un tipo y AND entre tipos.
+## Label model
+Four default types (Role, Application, Environment, Location) with a prefix in the value:
+- R_<Role>   (R_DNS, R_NTP, R_Monitoring, R_LogCollector, R_Backup, R_Database, R_LoadBalancer, R_AppServer, R_Bastion, R_Scanner, R_Mail, R_Messaging, R_DomainController, R_AgentMgmt)
+- A_<App>    (one per business application, plus A_CoreInfra, A_Observability, A_SecurityTools, A_AdminAccess)
+- E_<Env>    (E_Prod, E_QA, E_Dev; if there is no evidence, E_Prod "a confirmar")
+- L_<Loc>    (site or cloud: L_DC1, L_OCI, L_AWS, L_Azure, L_GCP)
+If the PCE already has a convention (attached screenshots), respect it. Explain that the Application label is what supports the ringfence and that Illumio applies OR within a type and AND between types.
 
-## Hallazgos de ciberseguridad
-Listá hallazgos con ID (S-01…), severidad (Alta/Media/Baja/Info), evidencia concreta del export y recomendación. Buscá al menos: escaneos sin ventana declarada, software fuera de soporte (deducido de procesos/usuarios/banners), protocolos en claro (FTP, Telnet, HTTP con credenciales, SMB1), bases de datos alcanzadas por direccionamiento público, tormentas de DNS u otros volúmenes anómalos, NTP/DNS públicos directos desde servidores, SSH/RDP directo como root/Administrator, puertos de gestión expuestos (AJP, JMX, RMI, WinRM), broadcast/multicast no explicado, inventario de agentes con salida propia. Cada hallazgo debe poder verificarse en Explorer con un filtro de IP y puerto.
+## Cybersecurity findings
+List findings with ID (S-01…), severity (Alta/Media/Baja/Info), concrete evidence from the export and a recommendation. Look at least for: scans without a declared window, out-of-support software (deduced from processes/users/banners), cleartext protocols (FTP, Telnet, HTTP with credentials, SMB1), databases reached from public addressing, DNS storms or other anomalous volumes, direct public NTP/DNS from servers, direct SSH/RDP as root/Administrator, exposed management ports (AJP, JMX, RMI, WinRM), unexplained broadcast/multicast, agent inventory with its own egress. Every finding must be verifiable in Explorer with an IP and port filter.
 
-## Verificación de hechos
-Antes de afirmar un puerto, un proceso, una versión, una fecha de fin de soporte o un comportamiento de Illumio, verificalo contra documentación oficial vigente (product-docs-repo.illumio.com para Illumio; la documentación del fabricante para Zabbix, Oracle, Splunk, NetBackup, Trend Micro, OCI/AWS/Azure) y citá la URL. Lo que no puedas verificar, marcalo como supuesto. No inventes hostnames, nombres de personas ni datos comerciales.
+## Fact verification
+Before asserting a port, a process, a version, an end-of-support date or an Illumio behavior, verify it against current official documentation (product-docs-repo.illumio.com for Illumio; the vendor's documentation for Zabbix, Oracle, Splunk, NetBackup, Trend Micro, OCI/AWS/Azure) and cite the URL. Mark whatever you cannot verify as an assumption. Do not invent hostnames, people's names or commercial data.
 
-## Entregables
-1. Informe en español, orientado al cliente pero SIN el nombre del cliente ni de personas (usá "el cliente", "la POC"), en HTML y PDF con la skill illumio-branded-reports. Secciones: resumen ejecutivo con indicadores (filas, ventana, workloads con VEN, IPs sin gestionar, porcentaje de ruido), datos y método (incluida la normalización y el truncamiento), inventario de workloads con VEN y etiquetas propuestas, workloads no gestionados a crear (tabla: nombre/FQDN, IP, rol inferido y evidencia, confianza, etiquetas R/A/E/L, prioridad), redes internas y listas de IP (tabla: nombre, miembros, razonamiento, uso en reglas), modelo de etiquetas, patrones de acceso observados con un diagrama en capas, hallazgos de ciberseguridad, política inicial propuesta (servicios y reglas de ringfence por aplicación más bloque común de gestión), próximos pasos, anexos y fuentes por sección. Diagramas como SVG inline con la paleta de la skill, sin texto rotado ni fuera de las cajas.
-2. Workbook XLSX de objetos a cargar con hojas: UMWL, IP lists, Labels, Services, Rules (borrador) y Findings.
-3. CSV de workloads no gestionados en el formato de workloader wkld-import, UNA FILA POR IP, columnas exactas:
+## Deliverables
+1. Report in Spanish, customer-oriented but WITHOUT the customer's name or people's names (use "el cliente", "la POC"), in HTML and PDF with the illumio-branded-reports skill. Sections: executive summary with indicators (rows, window, workloads with a VEN, unmanaged IPs, noise percentage), data and method (including normalization and truncation), inventory of workloads with a VEN and proposed labels, unmanaged workloads to create (table: name/FQDN, IP, inferred role and evidence, confidence, R/A/E/L labels, priority), internal networks and IP lists (table: name, members, reasoning, use in rules), label model, observed access patterns with a layered diagram, cybersecurity findings, proposed initial policy (services and ringfence rules per application plus a common management block), next steps, appendices and sources per section. Diagrams as inline SVG with the skill's palette, no rotated text and nothing outside the boxes.
+2. XLSX workbook of objects to load with sheets: UMWL, IP lists, Labels, Services, Rules (draft) and Findings.
+3. Unmanaged workload CSV in the workloader wkld-import format, ONE ROW PER IP, exact columns:
    hostname,name,interfaces,description,role,app,env,loc,review
-   - hostname: vacío siempre (los FQDN del export pueden estar anonimizados).
-   - name: "<Rol descriptivo> <IP>", por ejemplo "Zabbix Server 10.43.43.21". Debe ser único.
+   - hostname: always empty (the FQDNs in the export may be anonymized).
+   - name: "<Descriptive role> <IP>", for example "Zabbix Server 10.43.43.21". Must be unique.
    - interfaces: "eth0:<ip>".
-   - description: "[<grupo> P<prioridad> conf:<Alta|Media|Baja>] <comentario con la evidencia>", por ejemplo "[C3 P1 conf:Alta] Servidor Zabbix: consulta 10050/TCP e ICMP en atun4 y wlsfp1a (≈600.000 flujos) y recibe 10051".
-   - role, app, env, loc: valores con prefijo R_/A_/E_/L_. Celda vacía si no hay etiqueta.
+   - description: "[<group> P<priority> conf:<Alta|Media|Baja>] <comment with the evidence>", for example "[C3 P1 conf:Alta] Servidor Zabbix: consulta 10050/TCP e ICMP en atun4 y wlsfp1a (≈600.000 flujos) y recibe 10051".
+   - role, app, env, loc: values with the R_/A_/E_/L_ prefix. Empty cell if there is no label.
    - review: PENDING.
-   Prioridad 1 = necesario para el ringfence (front-ends, bases de datos, plano de gestión diario); 2 = útil pero confirmable después; 3 = identificar antes de crear.
-4. CSV de listas de IP en el formato de workloader ipl-import, columnas exactas:
+   Priority 1 = required for the ringfence (front-ends, databases, daily management plane); 2 = useful but confirmable later; 3 = identify before creating.
+4. IP list CSV in the workloader ipl-import format, exact columns:
    name,description,include,exclude,fqdns
-   - name en minúsculas con prefijo ipl- (ipl-dns-corp, ipl-oci-metadata); include con IPs, CIDR o rangos separados por ";"; fqdns para nombres.
-5. Un bloque final "Supuestos y verificaciones pendientes" con todo lo que el cliente debe confirmar antes de cargar.
+   - name in lowercase with the ipl- prefix (ipl-dns-corp, ipl-oci-metadata); include with IPs, CIDRs or ranges separated by ";"; fqdns for names.
+5. A final "Supuestos y verificaciones pendientes" block with everything the customer must confirm before loading.
 
-Entregá primero un resumen de lo que encontraste en la normalización y una propuesta de agrupación; después el informe y los CSV.
+Deliver first a summary of what you found during normalization and a grouping proposal; then the report and the CSVs.
 ````
 
-### Variante corta: actualizar con un export nuevo (v2)
+### Short variant: update with a new export (v2)
 
 ````text
-Te adjunto un export nuevo de Explorer/Traffic del mismo alcance que el análisis anterior (adjunto también el informe previo y los CSV umwl-import e ipl-import ya cargados o propuestos). Necesito la versión v2:
+I am attaching a new Explorer/Traffic export with the same scope as the previous analysis (I am also attaching the previous report and the umwl-import and ipl-import CSVs already loaded or proposed). I need the v2 version:
 
-1. Normalizá el export nuevo con las mismas reglas (IPs mutiladas, fechas, truncamiento, deduplicación) y compará ventana, filas y ruido con el export anterior.
-2. Diferencias contra los objetos ya propuestos: peers nuevos (proponer UMWL o lista con evidencia, confianza y prioridad), peers que desaparecieron (marcar como "sin tráfico en la ventana nueva", no borrar), cambios de rol o de etiqueta sugeridos por la evidencia nueva, hallazgos nuevos o cerrados.
-3. Entregá:
-   - <grupo>-umwl-import-v2.csv completo (no solo el delta), mismas columnas y nomenclatura (hostname vacío, name "<Rol> <IP>", interfaces "eth0:<ip>", description "[<grupo> P<n> conf:X] …", etiquetas R_/A_/E_/L_, review = PENDING para filas nuevas y UPDATED para filas cuyo comentario o etiquetas cambiaron, UNCHANGED para el resto).
-   - <grupo>-ipl-import-v2.csv completo.
-   - Una tabla de cambios (IP, antes, después, motivo) y una sección de hallazgos actualizada.
-   - Si hace falta el informe completo, generalo con la skill illumio-branded-reports; si no, un addendum de dos páginas.
-Verificá contra documentación oficial cualquier puerto, versión o comportamiento nuevo que afirmes y citá la URL. Sin nombre del cliente ni de personas.
+1. Normalize the new export with the same rules (mangled IPs, dates, truncation, deduplication) and compare window, rows and noise with the previous export.
+2. Differences against the objects already proposed: new peers (propose a UMWL or a list with evidence, confidence and priority), peers that disappeared (mark them as "sin tráfico en la ventana nueva", do not delete), role or label changes suggested by the new evidence, new or closed findings.
+3. Deliver:
+   - <group>-umwl-import-v2.csv, complete (not only the delta), same columns and naming (empty hostname, name "<Role> <IP>", interfaces "eth0:<ip>", description "[<group> P<n> conf:X] …", R_/A_/E_/L_ labels, review = PENDING for new rows and UPDATED for rows whose comment or labels changed, UNCHANGED for the rest).
+   - <group>-ipl-import-v2.csv, complete.
+   - A table of changes (IP, before, after, reason) and an updated findings section.
+   - If the full report is needed, generate it with the illumio-branded-reports skill; if not, a two-page addendum.
+Verify against official documentation any new port, version or behavior you assert and cite the URL. No customer or people's names. Deliverables in Spanish.
 ````
 
-Después de obtener el CSV v2, la TUI hace el resto: en el paso 4 las filas cuya IP ya existe salen como EXISTS-UNMANAGED y se actualizan por `href` (etiquetas y descripción); las nuevas se crean.
+After obtaining the v2 CSV, the TUI does the rest: in step 4 the rows whose IP already exists come out as EXISTS-UNMANAGED and are updated by `href` (labels and description); the new ones are created.
 
 ---
 
-## Solución de problemas
+## Troubleshooting
 
-| Síntoma | Causa y solución |
+| Symptom | Cause and fix |
 |---|---|
-| macOS no deja ejecutar `workloader` ("no se puede abrir porque no se pudo verificar el desarrollador") | Cuarentena de Gatekeeper al descargar el zip. `xattr -d com.apple.quarantine ./workloader && chmod +x ./workloader`. La TUI lo hace al descargar. |
-| `workloader` en Apple Silicon | El release de macOS es un binario Intel y corre con Rosetta 2 (`softwareupdate --install-rosetta` si no está instalado). Para un binario nativo: `brew install go`, `git clone https://github.com/brian1917/workloader.git && cd workloader && go build -o ../workloader .` (la TUI ofrece esta opción). |
-| `pce-add` pide correo y contraseña aunque pasaste `--api-user` | Falta el flag `--api-key`; sin él workloader ignora `--api-user/--api-secret/--org`. El kit ya lo incluye. |
-| 401/403 al importar; el dry run funciona | La API key hereda el rol del usuario. Creala con un usuario Global Organization Owner o Global Administrator (un Workload Manager con alcance puede crear workloads, pero no etiquetas nuevas ni listas de IP), o usá una service account con esos permisos. Verificá también el `org id`. |
-| Error TLS con PCE on-prem y certificado interno | `pce-add … --disable-tls-verification true` solo en laboratorio; en producción instalá la CA en el llavero. |
-| El PCE que muestra `pce-list` no es el del cliente | Estás en la carpeta equivocada o `ILLUMIO_CONFIG` apunta a otro archivo. Una carpeta por PCE; `unset ILLUMIO_CONFIG`; usá `--pce <nombre>`. |
-| El dry run dice que va a actualizar un workload que no esperabas | Match por `hostname` o `name` con un objeto existente. Revisá `runs/<ts>/dry-*.log`; renombrá la fila (paso 4/5) o dejá que la reconciliación por IP lo resuelva. |
-| Names duplicados / "se cargó uno solo" | workloader trata dos filas con el mismo `hostname` (o el mismo `name` sin hostname) como el mismo workload. La TUI agrega la IP como sufijo; a mano, hacé único el `name`. |
-| Una columna de etiqueta no se aplicó | El tipo de etiqueta no existe en el PCE; `wkld-import` ignora la columna. Crealo en la consola (Settings → Label Settings) o con `./workloader label-dimension-import tipos.csv --update-pce` (CSV con `key,display_name`), y volvé a correr. |
-| El export de Explorer tiene exactamente N filas redondas | Está truncado. Subí el límite de resultados, filtrá por aplicación, excluí escáneres, dividí la ventana de tiempo y volvé a exportar (ver sección de extracción). |
-| `wkld-import` crea la etiqueta con otra capitalización | Los valores son sensibles a mayúsculas salvo `--ignore-case`. Usá exactamente los valores que muestra `label-export`. |
-| Lote fallido en el paso 7 | Revisá `runs/<ts>/create-chunkNNN.log`; el CSV de ese lote queda en `create-chunkNNN.csv` para reintentarlo a mano con `wkld-import … --umwl --update-pce`. |
+| macOS does not let you run `workloader` ("cannot be opened because the developer cannot be verified") | Gatekeeper quarantine on the downloaded zip. `xattr -d com.apple.quarantine ./workloader && chmod +x ./workloader`. The TUI does this when it downloads. |
+| `workloader` on Apple Silicon | The macOS release is an Intel binary and runs through Rosetta 2 (`softwareupdate --install-rosetta` if it is not installed). For a native binary: `brew install go`, `git clone https://github.com/brian1917/workloader.git && cd workloader && go build -o ../workloader .` (the TUI offers this option). |
+| `pce-add` asks for email and password even though you passed `--api-user` | The `--api-key` flag is missing; without it workloader ignores `--api-user/--api-secret/--org`. The kit already includes it. |
+| 401/403 when importing; the dry run works | The API key inherits the user's role. Create it with a Global Organization Owner or Global Administrator user (a scoped Workload Manager can create workloads, but not new labels or IP lists), or use a service account with those permissions. Check the `org id` too. |
+| TLS error with an on-prem PCE and an internal certificate | `pce-add … --disable-tls-verification true` only in a lab; in production install the CA in the keychain. |
+| The PCE shown by `pce-list` is not the customer's (or is another organization) | You are in the wrong folder (the current directory decides which `pce.yaml` is used) or `ILLUMIO_CONFIG` points to another file. One folder per account + PCE; `unset ILLUMIO_CONFIG`; `--pce <name>` only if the `pce.yaml` has several profiles. |
+| The dry run says it will update a workload you did not expect | Match by `hostname` or `name` with an existing object. Check `runs/<ts>/dry-*.log`; rename the row (step 4/5) or let the IP reconciliation resolve it. |
+| Duplicate names / "only one was loaded" | workloader treats two rows with the same `hostname` (or the same `name` without hostname) as the same workload. The TUI appends the IP as a suffix; by hand, make the `name` unique. |
+| A label column was not applied | The label type does not exist in the PCE; `wkld-import` ignores the column. Create it in the console (Settings → Label Settings) or with `./workloader label-dimension-import types.csv --update-pce` (CSV with `key,display_name`), and run again. |
+| The Explorer export has exactly N round rows | It is truncated. Raise the result limit, filter by application, exclude scanners, split the time window and export again (see the extraction section). |
+| `wkld-import` creates the label with different capitalization | Values are case-sensitive unless `--ignore-case`. Use exactly the values shown by `label-export`. |
+| Failed batch in step 7 | Check `runs/<ts>/create-chunkNNN.log`; the CSV of that batch stays in `create-chunkNNN.csv` to retry it by hand with `wkld-import … --umwl --update-pce`. |
 
 ---
 
-## Guía explicativa (PDF)
+## Explanatory guide (PDF)
 
-[docs/Guia-workloader-import-kit.pdf](docs/Guia-workloader-import-kit.pdf) explica con diagramas el flujo completo (export → análisis → CSV → kit → workloader → PCE), los requisitos, la secuencia de pasos de la TUI con sus puntos de decisión, la relación entre el kit y los subcomandos de workloader y el mapeo de columnas del CSV a campos y etiquetas del PCE. La misma guía está en HTML autocontenido en `docs/Guia-workloader-import-kit.html`.
+The guide explains with diagrams the end-to-end flow (export → analysis → CSV → kit → workloader → PCE), the requirements and the one-folder-per-account + PCE rule, the initialization of the working folder, the sequence of TUI steps with their decision points, the relationship between the kit and the workloader subcommands, the mapping of CSV columns to PCE fields and labels, and troubleshooting. It is available in two languages, with the same content:
 
-## Fuentes consultadas
+- English: [docs/Guide-workloader-import-kit-EN.pdf](docs/Guide-workloader-import-kit-EN.pdf) (self-contained HTML: `docs/Guide-workloader-import-kit-EN.html`).
+- Español: [docs/Guia-workloader-import-kit.pdf](docs/Guia-workloader-import-kit.pdf) (HTML autocontenido: `docs/Guia-workloader-import-kit.html`).
+
+## Sources consulted
 
 - workloader (brian1917): README, releases v12.1.9, `cmd/root.go`, `cmd/wkldimport/cmd.go`, `cmd/iplimport/iplimport.go`, `cmd/wkldexport/headers.go`, `cmd/pcemgmt/addpce.go`, `cmd/labeldimension/import.go`, `cmd/traffic/traffic.go` — https://github.com/brian1917/workloader
-- Illumio Core 25.4 — Visualization — About the Visualization Tools (Explore, Traffic, límites, consultas asíncronas) — https://product-docs-repo.illumio.com/Tech-Docs/Core/25.4/Visualization/out/en/visualization-tools/about-the-visualization-tools.html
-- Illumio Core 25.1 — Visualization — Traffic Table (filtros, Export) — https://product-docs-repo.illumio.com/Tech-Docs/Core/25.1/Visualization/out/en/visualization-tools/traffic-table.html
-- Illumio Core 22.5 — REST API — Explorer (async_queries, max_results 200.000) — https://product-docs-repo.illumio.com/Tech-Docs/Core/22.5/REST-APIs/out/en/core-22-5-rest-api-developer-guide/visualization/explorer.html
-- Illumio Core 24.2 — REST API — API Keys (My API Keys, permisos) — https://product-docs-repo.illumio.com/Tech-Docs/Core/24.2/REST-APIs/out/en/rest-apis/authentication-and-api-user-permissions/api-keys.html
+- Illumio Core 25.4 — Visualization — About the Visualization Tools (Explore, Traffic, limits, asynchronous queries) — https://product-docs-repo.illumio.com/Tech-Docs/Core/25.4/Visualization/out/en/visualization-tools/about-the-visualization-tools.html
+- Illumio Core 25.1 — Visualization — Traffic Table (filters, Export) — https://product-docs-repo.illumio.com/Tech-Docs/Core/25.1/Visualization/out/en/visualization-tools/traffic-table.html
+- Illumio Core 22.5 — REST API — Explorer (async_queries, max_results 200,000) — https://product-docs-repo.illumio.com/Tech-Docs/Core/22.5/REST-APIs/out/en/core-22-5-rest-api-developer-guide/visualization/explorer.html
+- Illumio Core 24.2 — REST API — API Keys (My API Keys, permissions) — https://product-docs-repo.illumio.com/Tech-Docs/Core/24.2/REST-APIs/out/en/rest-apis/authentication-and-api-user-permissions/api-keys.html
 - Illumio Core 24.5 — Security Policy — Workload Setup Using PCE Web Console (Add Unmanaged Workload) — https://product-docs-repo.illumio.com/Tech-Docs/Core/24.5/Security-Policy/out/en/security-policy-guide-24-5/workloads/workload-setup-using-pce-web-console.html
 - Illumio Core 24.2 — Getting Started — Policy Objects — https://product-docs-repo.illumio.com/Tech-Docs/Core/24.2/Getting%20Started/out/en/policy-overview/policy-objects.html
 - Illumio Core 25.4 — Security Policy — Create a Label Type — https://product-docs-repo.illumio.com/Tech-Docs/Core/25.4/Security-Policy/out/en/security-policy-objects/about-labels-and-label-groups/label-types/create-a-label-type.html
 
-## Licencia
+## License
 
-MIT. Ver [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
