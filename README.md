@@ -45,7 +45,7 @@ Antes de cada corrida, la TUI ejecuta `workloader pce-list` y te muestra el PCE 
 | `reconcile_umwl.py` | Versión mínima y no interactiva del paso de reconciliación por IP: a partir de un `wkld-export` y del CSV propuesto genera `-to-create.csv`, `-existing.csv`, `-conflicts.csv` y un reporte de texto. No escribe en el PCE. |
 | `examples/*-umwl-import.csv` | CSV de workloads no gestionados propuestos (una fila por IP) de tres grupos de una prueba de concepto. Son **ejemplos de POC**: contienen IPs de laboratorio del cliente y sirven como plantilla de formato, no para cargar tal cual. |
 | `examples/cliente3-umwl-import-v2.csv` | **Formato recomendado** a partir de ahora: etiquetas con prefijo `R_/A_/E_/L_`, `name` = rol descriptivo + IP, `hostname` vacío, `interfaces` = `eth0:<ip>`, comentario del informe en `description`. |
-| `examples/*-ipl-import.csv` | Listas de IP propuestas en el formato de `workloader ipl-import`. |
+| `examples/*-ipl-import.csv` | Listas de IP propuestas en el formato de `workloader ipl-import`. `cliente3-ipl-import-v2.csv` usa la convención `IPL_<Sitio>_<Uso>`. |
 | `docs/Guia-workloader-import-kit.pdf` | Guía explicativa con diagramas (flujo completo, requisitos, pasos de la TUI, relación kit/workloader, mapeo CSV → objetos del PCE). También en `docs/Guia-workloader-import-kit.html` (archivo único, se abre con doble clic). |
 | `.gitignore` | Excluye `workloader` (binario), `workloader/` (clon), `pce.yaml`, `*.log`, `runs/`, zips. **Nunca subas `pce.yaml`: contiene la API key.** |
 
