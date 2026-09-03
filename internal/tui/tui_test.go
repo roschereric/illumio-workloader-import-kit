@@ -78,7 +78,7 @@ func setup(t *testing.T) (*model, string) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not available")
 	}
-	for _, f := range []string{"cliente3-umwl-import-v2.csv", "cliente3-ipl-import-v2.csv"} {
+	for _, f := range []string{"sample-umwl-import-v2.csv", "sample-ipl-import-v2.csv"} {
 		b, _ := os.ReadFile(filepath.Join(td, f))
 		os.WriteFile(filepath.Join(dir, f), b, 0o644)
 	}
@@ -86,7 +86,7 @@ func setup(t *testing.T) (*model, string) {
 	old, _ := os.Getwd()
 	os.Chdir(dir)
 	t.Cleanup(func() { os.Chdir(old) })
-	m, err := New(Config{CSV: "cliente3-umwl-import-v2.csv", IPL: "cliente3-ipl-import-v2.csv", Priority: "1", RunsDir: "./runs", Chunk: 20, Version: "test"})
+	m, err := New(Config{CSV: "sample-umwl-import-v2.csv", IPL: "sample-ipl-import-v2.csv", Priority: "1", RunsDir: "./runs", Chunk: 20, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestFullRun(t *testing.T) {
 		t.Fatalf("expected Ready in view:\n%s", v)
 	}
 	press(t, m, "enter") // load CSV
-	if m.csv == nil || len(m.csv.Rows) != 42 {
+	if m.csv == nil || len(m.csv.Rows) != 24 {
 		t.Fatalf("csv rows: %v", m.csv)
 	}
 	press(t, m, "enter") // inventory → labels
@@ -232,7 +232,7 @@ func TestPickerFlowAndBadCSVRecovery(t *testing.T) {
 		t.Fatal("expected the file picker")
 	}
 	v := m.View()
-	for _, want := range []string{"Proposed workloads CSV", "cliente3-umwl-import-v2.csv", "sub/", "path "} {
+	for _, want := range []string{"Proposed workloads CSV", "sample-umwl-import-v2.csv", "sub/", "path "} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("picker view missing %q:\n%s", want, v)
 		}
@@ -264,14 +264,14 @@ func TestPickerFlowAndBadCSVRecovery(t *testing.T) {
 	}
 	// type an exact path in the path field
 	press(t, m, "tab")
-	m.picker.input.SetValue(filepath.Join(dir, "cliente3-umwl-import-v2.csv"))
+	m.picker.input.SetValue(filepath.Join(dir, "sample-umwl-import-v2.csv"))
 	press(t, m, "enter")
 	press(t, m, "esc")   // no IPL
 	press(t, m, "enter") // priority default "1"
-	if m.csv == nil || len(m.csv.Rows) != 42 || m.step != stCSV {
+	if m.csv == nil || len(m.csv.Rows) != 24 || m.step != stCSV {
 		t.Fatalf("csv not loaded via typed path: step=%d", m.step)
 	}
-	if m.cfg.CSV != "cliente3-umwl-import-v2.csv" {
+	if m.cfg.CSV != "sample-umwl-import-v2.csv" {
 		t.Fatalf("expected relative path, got %q", m.cfg.CSV)
 	}
 }

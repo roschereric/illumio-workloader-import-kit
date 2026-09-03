@@ -55,25 +55,39 @@ For each IP that talks to a VEN workload and is not itself a VEN:
 - **IP list**: populations and ranges — user VLANs, whole subnets of a tier, cloud metadata (169.254.169.254),
   vendor SaaS endpoints by FQDN, public NTP, anything you would never label individually.
 - Front-ends vs load balancers: a few sources with even volumes against the application port are the **tier that
-  talks to the backend**, usually web/app servers behind a VIP → `R_WebServer`. Call something a load balancer only if
+  talks to the backend**, usually web/app servers behind a VIP → role `Web`. Call something a load balancer only if
   it is the VIP itself, or if the load is symmetric across its IPs and it does nothing else (no FTP, no uneven
   per-node/per-port loads). Same-subnet-as-backend and any file transfer from those IPs mean servers, not LBs.
 - Zabbix: the server/proxy opens 10050 to the agent (passive) and receives 10051 (active); both directions need rules.
-- Cloud VMs: 169.254.169.254 is metadata and (OCI) the VCN resolver — an IP list, never an anomaly by itself.
+- Cloud VMs: 169.254.169.254 is the metadata endpoint (and, in some clouds, the virtual-network resolver) — an IP list, never an anomaly by itself.
 
 ## 4. Label model
 
-Four default types plus any custom type the PCE already has. Use the customer's prefix convention:
+Illumio ships four default label types — **Role, Application, Environment, Location** — and lets the PCE define
+custom ones (up to 20 label types per PCE; each has a unique key such as `role`, `app`, `env`, `loc`, `os`). Label
+**values are free text**; Illumio's own guidance is to keep them simple and to mirror what the organization already
+calls things: roles like `Web`, `App`, `Database`, `LoadBalancer`; applications by their business name; environments
+`Production`, `Staging`, `Development`; locations that mimic the infrastructure (`DC1`, `AWS`, `Frankfurt`). There is
+no mandated prefix or separator scheme.
 
-- `R_<Role>` — function of the host (R_WebServer, R_AppServerWLS, R_WebTierOHS, R_LoadBalancer for VIPs only,
-  R_Database, R_DNS, R_NTP, R_Monitoring, R_LogCollector, R_Backup, R_Bastion, R_Scanner, R_Messaging, R_Mail,
-  R_AgentMgmt, R_FileTransfer).
-- `A_<App>` — the business application; it is what defines the ringfence. Reuse the values that exist in the PCE;
-  propose new ones as provisional; use `A_CoreInfra`, `A_Observability`, `A_SecurityTools`, `A_AdminAccess` for shared
-  infrastructure. Leave empty when ownership is unknown rather than guessing.
-- `E_<Env>` — `E_Prod` unless evidence says otherwise (hostname suffixes are hints, not proof).
-- `L_<Site>` — one value per data center / cloud region (e.g. `L_CDLV`, `L_OCI`).
-- Values must exist as label **types** in the PCE; a CSV column that is not a type is ignored by workloader.
+Rules for this analysis:
+
+- **Reuse before inventing.** `pce-labels.csv` is the authority: if a value exists for that type, use it exactly
+  (case and spelling). Propose new values only when nothing fits, mark them "provisional" in the report, and keep
+  them consistent with the style already in the PCE — if the customer prefixes values (`R_Web`, `APP-Ordering`) or
+  uses a casing convention, follow that convention; if the PCE is empty or uses plain values, use plain values.
+- **One value per type per workload.** Role = function of the host (`Web`, `App`, `Database`, `LoadBalancer` — for
+  VIPs only —, `DNS`, `NTP`, `Monitoring`, `LogCollector`, `Backup`, `Bastion`, `Scanner`, `Messaging`, `MailRelay`,
+  `AgentManager`, `FileTransfer`). Application = the business application that owns the host; it is what the
+  ringfence is built on. For shared infrastructure use one application value per shared function
+  (`Shared Services`, `Monitoring`, `Security Tools`, `Admin Access`) rather than leaving it empty; leave Application
+  empty only when ownership is unknown, and say so, instead of guessing. Environment = `Production` unless the
+  evidence says otherwise (hostname suffixes are hints, not proof). Location = one value per data center or cloud
+  region, named the way the customer names them.
+- **Only types that exist in the PCE.** `pce-label-types.csv` lists them; a CSV column that is not a label type is
+  silently ignored by workloader. If a needed type is missing (for example `os`), say it in the report and provide
+  the `label-dimension-import` step; do not fold the information into another type.
+- Label values in this document are **examples of style**, not a catalogue: take the names from the customer.
 
 ## 5. Security findings
 
@@ -100,12 +114,13 @@ dependency on any template. Sections, in this order:
 4. Inventario de workloads con VEN — host, IP, platform evidence (processes/users), traffic profile, proposed labels.
 5. Workloads no gestionados a crear — table: base name, IPs, role & evidence, labels R/A/E/L, confidence, priority
    (1 = needed for the ringfence today, 2 = useful, 3 = next wave), seen in (v1/v2).
-6. Redes internas y listas de IP — name (`IPL_<Site>_<Use>`), members, reasoning, use in rules.
+6. Redes internas y listas de IP — name (descriptive, in the customer's style: `Corporate DNS`, `Ordering Front-End Subnet`), members, reasoning, use in rules.
 7. Modelo de etiquetas — types, values, assignment criteria, how a CSV row is built (diagram).
 8. Patrones de acceso observados — tier diagram (SVG) per application: front-ends → VEN → back-ends + management plane.
 9. Hallazgos para ciberseguridad — the S-xx table.
-10. Política inicial propuesta — services table (`SVC_<Name>`, ports), ruleset table (consumer, provider, service,
-    status observed), recommended sequence.
+10. Política inicial propuesta — services table (name, ports/protocol), ruleset table (consumer, provider, service,
+    status observed), recommended sequence. Name services and rulesets descriptively (`Ordering Web 8080`,
+    `Ringfence Ordering`); follow the customer's convention if the PCE already has one.
 11. Próximos pasos.
 12. Anexos — external destinations, scanners, export columns, files delivered.
 
@@ -119,11 +134,13 @@ hostname,name,interfaces,description,role,app,env,loc,review
 ```
 
 - One row per IP. `hostname` **empty** (exports may be pseudonymized; the PCE convention is name-based).
-- `name` = `<descriptive role> <IP>` (e.g. `Front-End WLS 172.27.1.6`, `DNS Corporativo 192.168.161.92`); unique.
+- `name` = `<descriptive role> <IP>` (e.g. `Front-End Ordering 10.20.1.11`, `DNS Corporativo 10.10.0.53`); unique.
+  When the real hostname is known and not pseudonymized, put it in `hostname` too (workloader can then match on it).
 - `interfaces` = `eth0:<ip>`.
 - `description` = `[<grupo> P<prio> conf:<Alta|Media|Baja>] <evidence from the report> | Visto en: v1+v2 | solo v1`.
   Include the FQDN seen in the export when there is one ("FQDN en export (puede estar anonimizado): …").
-- `role,app,env,loc` = label values with the prefixes above; empty cell = no label of that type.
+- `role,app,env,loc` = one column per label type **key** as listed in `pce-label-types.csv` (add a column per custom
+  type, e.g. `os`); cell = the label value; empty cell = no label of that type.
 - `review` = `PENDING` (the reviewer's column; workloader ignores it).
 - Also include the six-or-so "next wave" hosts (priority 3) when the export shows them.
 
@@ -134,7 +151,7 @@ name,description,include,exclude,fqdns
 ```
 
 `include` entries separated by `;` (CIDR, single IP or `a.b.c.d-a.b.c.e` ranges); `fqdns` separated by `;`
-(`*.sa-vinhedo-1.oraclecloud.com`). Description starts with `[<grupo>]` and ends with "— uso: <rule usage>".
+(`*.objectstorage.example-cloud.com`). Description starts with `[<grupo>]` and ends with "— uso: <rule usage>".
 
 ### 6.4 Objects workbook (optional)
 
@@ -150,7 +167,19 @@ PENDING for new rows, UPDATED for changed rows, UNCHANGED for the rest.
 ## 8. Quality gate before answering
 
 - Counts in the executive summary equal the counts in the tables and CSVs.
-- No LB label on anything that is not a VIP unless justified as in §3.
-- No hostname-derived role. No invented ports. Sources cited for every external fact.
+- No `LoadBalancer` role on anything that is not a VIP unless justified as in §3.
+- No hostname-derived role. No invented ports. No invented label values when `pce-labels.csv` has one that fits.
+  No prefixes or separators added to label values that the customer's PCE does not use. Sources cited for every
+  external fact.
 - CSV opens with `csv.DictReader`, has the exact headers, every `interfaces` parses as `eth0:<valid IP>`, names unique.
 - The report renders without external resources.
+
+## 9. References (verified 2026-09-03)
+
+- Illumio Core 24.5 Security Policy Guide — Labels and Label Groups → Create a Label Type: default types Role,
+  Application, Environment, Location; up to 20 label types; custom types have a unique key and display names.
+  https://product-docs-repo.illumio.com/Tech-Docs/Core/24.5/Security-Policy/out/en/security-policy-guide-24-5/security-policy-objects/labels-and-label-groups/create-a-label-type.html
+- Illumio Core 24.2 Getting Started — Labeling Workloads lesson: example values (`Web`, `Database`, environments
+  `production`/`staging`, locations that mimic infrastructure names such as `AWS`, `New-York`).
+  https://product-docs-repo.illumio.com/Tech-Docs/Core/24.2/Getting+Started/out/en/application-ringfencing/labeling-workloads-lesson.html
+- workloader `wkld-import` / `ipl-import` CSV contracts: github.com/brian1917/workloader (v12.1.9).

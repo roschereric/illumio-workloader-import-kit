@@ -11,10 +11,10 @@ if cmd=="version": print("workloader v12.1.9 (mock)")
 elif cmd=="pce-list": print("+------+------------------+\n| poc  | poc.illum.io     | default |")
 elif cmd=="wkld-export":
     out=opt("--output-file"); rows=[["href","hostname","name","managed","interfaces","public_ip","role","app","env","loc","ven_href"],
-        ["/orgs/1/workloads/a","atun4.ux.corp2.com","atun4","true","eth0:10.0.4.152/24","","R_NoRole","A_NoApp","E_NoEnv","L_NoLocation","/orgs/1/vens/1"],
-        ["/orgs/1/workloads/b","zbx-old","Zabbix Server","false","umwl:10.43.43.21","","","","","",""],
-        ["/orgs/1/workloads/c","dns1","DNS 1","false","umwl:192.168.161.105;umwl:192.168.161.92","","DNS","","","",""],
-        ["/orgs/1/workloads/d","dns1-dup","DNS dup","false","umwl:192.168.161.105","","","","","",""]]
+        ["/orgs/1/workloads/a","ord-app-01.lab.example.com","ord-app-01","true","eth0:10.20.2.20/24","","App","Ordering","Production","DC1","/orgs/1/vens/1"],
+        ["/orgs/1/workloads/b","zbx-old","Zabbix Server","false","umwl:10.10.4.21","","","","","",""],
+        ["/orgs/1/workloads/c","dns1","DNS 1","false","umwl:10.10.0.53;umwl:10.10.0.54","","DNS","","","",""],
+        ["/orgs/1/workloads/d","dns1-dup","DNS dup","false","umwl:10.10.0.53","","","","","",""]]
     if os.path.exists("created.txt"):
         for ip in open("created.txt").read().split(): rows.append([f"/orgs/1/workloads/{ip}",ip,ip,"false",f"umwl:{ip}","","","","","",""])
     csv.writer(open(out,"w",newline="")).writerows(rows); L(f"exported {len(rows)-1} workloads")
@@ -39,5 +39,5 @@ elif cmd=="wkld-import":
         for i,r in enumerate(rows,2): L(f"csv line {i} - {r.get('hostname')} to be created" if "--umwl" in args else f"csv line {i} - {r.get('hostname')} - {r.get('href')} - role to be changed from \"\" to \"{r.get('role')}\"")
         L(f"workloader identified 3 labels to create."); L(f"workloader identified {len(rows)} unmanaged workloads to create.")
 elif cmd=="ipl-import":
-    L("ipl-import mock: 14 ip lists to be created" if "--update-pce" not in args else "created 14 ip lists")
+    L("ipl-import mock: 13 ip lists to be created" if "--update-pce" not in args else "created 13 ip lists")
 else: print("mock: unknown", cmd); sys.exit(1)

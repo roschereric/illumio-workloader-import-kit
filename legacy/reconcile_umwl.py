@@ -6,7 +6,7 @@ Workloader's wkld-import matches rows on href / hostname / name, never on interf
 export the PCE inventory and reconcile:
 
     workloader wkld-export --output-file pce-workloads.csv
-    python3 reconcile_umwl.py pce-workloads.csv cliente3-umwl-import.csv
+    python3 reconcile_umwl.py pce-workloads.csv sample-umwl-import.csv
 
 Outputs (next to the proposed CSV):
     <proposed>-to-create.csv    rows whose IP is NOT in the PCE  -> workloader wkld-import <file> --umwl --update-pce

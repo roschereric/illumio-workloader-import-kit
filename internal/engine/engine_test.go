@@ -23,7 +23,7 @@ func TestCSVRoundTripHostileCells(t *testing.T) {
 	in := filepath.Join(dir, "in.csv")
 	hostile := "$(id); `uname -a` | rm -rf / && echo \"quoted\""
 	os.WriteFile(in, []byte("hostname,name,interfaces,description,role,app,env,loc,review\n"+
-		",\""+strings.ReplaceAll(hostile, "\"", "\"\"")+" 10.0.0.1\",eth0:10.0.0.1,\"[C1 P1 conf:Alta] "+strings.ReplaceAll(hostile, "\"", "\"\"")+"\",R_X,,E_Prod,L_CDLV,PENDING\n"), 0o644)
+		",\""+strings.ReplaceAll(hostile, "\"", "\"\"")+" 10.0.0.1\",eth0:10.0.0.1,\"[G1 P1 conf:Alta] "+strings.ReplaceAll(hostile, "\"", "\"\"")+"\",Web,,Production,DC1,PENDING\n"), 0o644)
 	cf, err := LoadCSV(in, "")
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestCSVRoundTripHostileCells(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recs[0]["name"] != hostile+" 10.0.0.1" || recs[0]["description"] != "[C1 P1 conf:Alta] "+hostile {
+	if recs[0]["name"] != hostile+" 10.0.0.1" || recs[0]["description"] != "[G1 P1 conf:Alta] "+hostile {
 		t.Fatalf("cells altered: %+v", recs[0])
 	}
 	if len(cf.LabelCols) != 3 { // app is empty everywhere → ignored
@@ -51,10 +51,10 @@ func TestLoadCSVDuplicatesAndPriority(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "in.csv")
 	os.WriteFile(in, []byte("hostname,name,interfaces,description,role\n"+
-		",Zabbix 10.0.0.1,eth0:10.0.0.1,[C1 P1 conf:Alta] a,R_M\n"+
-		",Zabbix 10.0.0.1,eth0:10.0.0.2,[C1 P2 conf:Alta] b,R_M\n"+
-		",Dup IP,eth0:10.0.0.1,[C1 P1 conf:Alta] c,R_M\n"+
-		",No IP,eth0:nope,[C1 P1 conf:Alta] d,R_M\n"), 0o644)
+		",Zabbix 10.0.0.1,eth0:10.0.0.1,[G1 P1 conf:Alta] a,Monitoring\n"+
+		",Zabbix 10.0.0.1,eth0:10.0.0.2,[G1 P2 conf:Alta] b,Monitoring\n"+
+		",Dup IP,eth0:10.0.0.1,[G1 P1 conf:Alta] c,Monitoring\n"+
+		",No IP,eth0:nope,[G1 P1 conf:Alta] d,Monitoring\n"), 0o644)
 	cf, err := LoadCSV(in, "")
 	if err != nil {
 		t.Fatal(err)
@@ -100,8 +100,8 @@ func TestPCEAddMasksSecret(t *testing.T) {
 }
 
 func TestClassifyAndApply(t *testing.T) {
-	inv := &Inventory{ByIP: map[string][]*PCEWorkload{}, Labels: map[string]bool{"role=R_DNS": true}, LabelKeys: []string{"role", "app"}}
-	umwl := &PCEWorkload{Href: "/w/1", Hostname: "dns1", Name: "DNS 1", Labels: map[string]string{"role": "R_DNS"}}
+	inv := &Inventory{ByIP: map[string][]*PCEWorkload{}, Labels: map[string]bool{"role=DNS": true}, LabelKeys: []string{"role", "app"}}
+	umwl := &PCEWorkload{Href: "/w/1", Hostname: "dns1", Name: "DNS 1", Labels: map[string]string{"role": "DNS"}}
 	ven := &PCEWorkload{Href: "/w/2", Hostname: "srv", Managed: true, Labels: map[string]string{}}
 	inv.ByIP["10.0.0.1"] = []*PCEWorkload{umwl}
 	inv.ByIP["10.0.0.2"] = []*PCEWorkload{ven}
@@ -109,12 +109,12 @@ func TestClassifyAndApply(t *testing.T) {
 	mk := func(ip, role string) *Row {
 		return &Row{Fields: map[string]string{"hostname": "", "name": "X " + ip, "interfaces": "eth0:" + ip, "role": role}, IPs: []string{ip}}
 	}
-	cf := &CSVFile{LabelCols: []string{"role", "os"}, Rows: []*Row{mk("10.0.0.1", "R_DNS"), mk("10.0.0.2", "R_X"), mk("10.0.0.3", "R_X"), mk("10.0.0.4", "R_NEW")}}
+	cf := &CSVFile{LabelCols: []string{"role", "os"}, Rows: []*Row{mk("10.0.0.1", "DNS"), mk("10.0.0.2", "Web"), mk("10.0.0.3", "Web"), mk("10.0.0.4", "Bastion")}}
 	plan := PlanLabels(cf, inv)
 	if len(plan.UnknownKeys) != 1 || plan.UnknownKeys[0] != "os" {
 		t.Fatalf("unknown keys %v", plan.UnknownKeys)
 	}
-	if len(plan.NewValues) != 2 { // R_X, R_NEW
+	if len(plan.NewValues) != 2 { // Web, Bastion
 		t.Fatalf("new values %v", plan.NewValues)
 	}
 	Classify(cf, inv)

@@ -15,7 +15,7 @@ Español: [README.es.md](README.es.md)
 5. Export from the PCE (console: guide §4 "Exporting from the PCE"; or workloader): `./workloader traffic --start 2026-08-17 --end 2026-09-01 --max-results 200000 --output-file TrafficData.csv`, then `./workloader wkld-export --output-file pce-workloads.csv`, `./workloader label-export --output-file pce-labels.csv`, `./workloader label-dimension-export --output-file pce-label-types.csv`.
 6. Pseudonymize before sharing: `python3 kit/anonymize_export.py anon TrafficData.csv -o TrafficData.anon.csv --map anon-map.json --customer "Customer A" --domain customer-a.com`
 7. Analysis in a Claude Project: instructions = `kit/docs/prompts/context.md`, message = `kit/docs/prompts/prompt-short.md`, attachments = `TrafficData.anon.csv` + the `pce-*.csv` exports. It returns the report, `<group>-umwl-import.csv` and `<group>-ipl-import.csv`.
-8. Real names back into the proposal: `python3 kit/anonymize_export.py deanon C4-umwl-import.csv -o customer-a-umwl-import.csv --map anon-map.json` (same for the IP lists CSV if it carries FQDNs).
+8. Real names back into the proposal: `python3 kit/anonymize_export.py deanon G1-umwl-import.csv -o customer-a-umwl-import.csv --map anon-map.json` (same for the IP lists CSV if it carries FQDNs).
 9. Load: `./umwl-tui customer-a-umwl-import.csv --ipl customer-a-ipl-import.csv --priority 1` — ten steps, dry run, "Write to the PCE?" confirmation, batches, verification.
 10. The run report: `runs/<timestamp>/report.md` (and `report.json`, the CSVs per bucket and every workloader log).
 
@@ -61,7 +61,7 @@ Before every run, `umwl-tui` executes `workloader pce-list` and shows you the PC
 | `docs/prompts/context.md`, `docs/prompts/prompt-short.md` | Claude Project instructions (the full method) and the per-conversation message (v1 and v2). |
 | `docs/export-columns.txt`, `docs/img/*.svg` | Header of a 25.x Traffic export; the schematics used by the guide. |
 | `docs/SPEC-umwl-tui.md`, `CLAUDE.md` | The contract of `umwl-tui` (state machine, UI, engine/workloader contract, security requirements, backlog) and the build/test/release commands, conventions and security checklist for Claude Code sessions. |
-| `examples/*-umwl-import.csv`, `examples/*-ipl-import.csv` | Proposed CSVs from a proof of concept (customer lab IPs: format templates, not for loading as-is). `cliente3-*-v2.csv` are the **recommended format**: `R_/A_/E_/L_` labels, `name` = role + IP, empty `hostname`, `interfaces` = `eth0:<ip>`, `IPL_<Site>_<Use>` lists. |
+| `examples/sample-*-import.csv` | A complete fictional dataset (two applications, shared services, one data center and one cloud region, RFC 1918 addressing) in the **recommended format**: plain label values, `name` = role + IP, empty `hostname`, `interfaces` = `eth0:<ip>`, descriptive IP list names. `sample-*-import-v2.csv` show the v2 review states; `testdata/` uses the same files for the tests. Templates only, not for loading as-is. |
 | `legacy/` | `umwl_loader.py` and `reconcile_umwl.py`, the plain-terminal predecessors (see "Legacy" below and `legacy/README.md`). |
 | `.gitignore` | Excludes `workloader`, `umwl-tui`, `pce.yaml`, `runs/`, `*.log`, `anon-map.json`, `*.anon.csv`, `*.real.csv`, `dist/`. **Never push `pce.yaml`: it contains the API key.** |
 
@@ -109,20 +109,20 @@ The same ten-step flow the kit always had, as a real terminal application (htop 
 ```
   umwl-tui  ● Ready                          PCE default (pce.yaml)  │  run 20260903-042451  │  step 4/10
 ╭──────────────────────────╮╭────────────────────────────────────────────────────────────────────────────╮
-│ STEPS                    ││ ■ Reconcile by IP — 42 rows · 3 awaiting a decision                        │
+│ STEPS                    ││ ■ Reconcile by IP — 24 rows · 3 awaiting a decision                        │
 │ ✔  0 Preflight           ││   IP                PROPOSED NAME            STATE               IN THE PCE│
-│ ✔  1 Load CSV            ││ ▶ 10.43.43.21       Zabbix Server 10.43.43…  EXISTS-UNMANAGED    zbx-old   │
-│ ✔  2 PCE inventory       ││   10.52.144.143     Zabbix Proxy OCI 10.52…  NEW                           │
-│ ✔  3 Labels              ││   192.168.161.105   DNS Corporativo 192.16…  CONFLICT-MULTIPLE   dns1      │
+│ ✔  1 Load CSV            ││ ▶ 10.10.4.21        Zabbix Server 10.10.4…   EXISTS-UNMANAGED    zbx-old   │
+│ ✔  2 PCE inventory       ││   10.30.4.21        Zabbix Proxy Cloud 10…   NEW                           │
+│ ✔  3 Labels              ││   10.10.0.53        DNS Corporativo 10.10…   CONFLICT-MULTIPLE   dns1      │
 │ ▶  4 Reconcile by IP     ││   …                                                                        │
-│ ○  5 Review new          ││ ■ Selected: 10.43.43.21                                                    │
+│ ○  5 Review new          ││ ■ Selected: 10.10.4.21                                                     │
 │ ○  6 Dry run             ││ proposed                            in the PCE · unmanaged                 │
-│ ○  7 Execute             ││   name      Zabbix Server 10.43.43.21   name      Zabbix Server            │
-│ ○  8 Verify              ││   role      R_Monitoring                role      —                        │
-│ ○  9 IP lists            ││   app       A_Observability             app       —                        │
+│ ○  7 Execute             ││   name      Zabbix Server 10.10.4.21    name      Zabbix Server            │
+│ ○  8 Verify              ││   role      Monitoring                  role      —                        │
+│ ○  9 IP lists            ││   app       Monitoring                  app       —                        │
 │ ○ 10 Report              ││                                                                            │
 │ EVENTS                   │╰────────────────────────────────────────────────────────────────────────────╯
-│ 04:24 reconcile: 39 NEW… │╭─ workloader output · tab to scroll ────────────────────────────────────────╮
+│ 04:24 reconcile: 21 NEW… │╭─ workloader output · tab to scroll ────────────────────────────────────────╮
 ╰──────────────────────────╯│ 04:24:51 $ workloader wkld-export --output-file runs/…/pce-workloads.csv   │
  u update  s skip  c create anyway  r rename+update  U/S all of this kind  enter next  tab log  ? help  q quit
 ```
@@ -186,7 +186,7 @@ The input of the analysis is the PCE traffic CSV. In 22.x–23.x consoles the vi
 1. **Time window**: at least 7 days including a weekend and, if they exist, backup and scanning windows.
 2. **Filters**: in *Source* (consumer) and *Destination* (provider) include the workloads with a VEN (or their application label) on one side and leave the other side open, with "or" between both sides to capture inbound and outbound; in *Service*, ports, protocols and processes.
 3. **Result limit**: the console shows up to 10,000 connections per page and 100,000 on screen; the downloaded CSV can reach 200,000 on a standalone PCE. **An export exactly at the limit is a truncated export** (the one we analyzed came with exactly 5,000 rows, 93 % of them one port scan). Raise the limit to the maximum, and if it still fills up split by application/workload group and shorter windows, and exclude the scanner source.
-4. **Run** (asynchronous queries appear later under **Load Results**, top right), then **Export** → CSV, named with customer, scope and dates (`customer-a_group1_2026-08-17_2026-09-01.csv`). **Open the CSV as text** (editor, `head`, Python). If you open it in Excel, import it with the wizard marking the IP columns as **Text**: Excel turns `10.0.4.10` into a number or a date. The same goes for the date columns.
+4. **Run** (asynchronous queries appear later under **Load Results**, top right), then **Export** → CSV, named with customer, scope and dates (`customer-a_G1_2026-08-17_2026-09-01.csv`). **Open the CSV as text** (editor, `head`, Python). If you open it in Excel, import it with the wizard marking the IP columns as **Text**: Excel turns `10.0.4.10` into a number or a date. The same goes for the date columns.
 
 Alternatives to the manual export:
 
@@ -197,20 +197,20 @@ The analysis also wants the current inventory: `wkld-export`, `label-export`, `l
 
 ## Policy objects and naming convention
 
-- **Unmanaged workloads (UMWL).** Network entities without a VEN that are registered in the PCE so that rules can be written about them; policy between a workload with a VEN and an unmanaged one is enforced by the rules on the side that has the VEN. **A peer is modeled as a UMWL when it is a specific server with an identifiable role** (DNS resolvers, internal NTP, Zabbix server and proxies, Splunk indexers, NetBackup master/media, databases, load balancer VIPs or front-ends, bastions, vulnerability scanners, SMTP relays, IBM MQ, OEM). **One per IP**, with labels; it appears in the ringfence rules like any other workload. In the console it is *Workloads → Add → Add Unmanaged Workload*.
-- **IP lists.** Static collections of addresses, ranges and FQDNs, for **broad peers or peers that are not servers**: user VLANs, whole application subnets, cloud metadata (`169.254.169.254`, which in OCI is also the VCN resolver), public NTP, EDR SaaS consoles, ranges published by a provider. They also coexist with the UMWLs as a shortcut: an `IPL_CDLV_OracleDB` list lets you write the "app → Oracle 1521" rule today and migrate it to labels later.
-- **Labels and label types.** The four default types are Role, Application, Environment and Location (RAEL); the PCE supports additional types. Illumio applies OR between values of the same type and AND between different types. **workloader creates label values that do not exist, but does not create types**: a CSV column that is not a PCE type is silently ignored by `wkld-import` (umwl-tui detects it in step 3 and offers to discard it or exit to create the type with `label-dimension-import`).
-- **Services.** Port/protocol objects (`SVC_DNS`, `SVC_App_8080`). The report proposes them, but **the kit does not create them**; load them with `workloader svc-import` or from the console when the rules are written.
+- **Unmanaged workloads (UMWL).** Network entities without a VEN that are registered in the PCE so that rules can be written about them; policy between a workload with a VEN and an unmanaged one is enforced by the rules on the side that has the VEN. **A peer is modeled as a UMWL when it is a specific server with an identifiable role** (DNS resolvers, internal NTP, monitoring servers and proxies, log indexers, backup master/media servers, databases, load balancer VIPs and the front-ends behind them, bastions, vulnerability scanners, SMTP relays, message queues). **One per IP**, with labels; it appears in the ringfence rules like any other workload. In the console it is *Workloads → Add → Add Unmanaged Workload*.
+- **IP lists.** Static collections of addresses, ranges and FQDNs, for **broad peers or peers that are not servers**: user VLANs, whole application subnets, cloud metadata (`169.254.169.254`, in some clouds also the virtual-network resolver), public NTP, EDR SaaS consoles, ranges published by a provider. They also coexist with the UMWLs as a shortcut: a `Billing Databases` list lets you write the "app → database 1521" rule today and migrate it to labels later.
+- **Labels and label types.** The four default types are Role, Application, Environment and Location; a PCE can define up to 20 types, each with a unique key (`role`, `app`, `env`, `loc`, `os`…). Values are free text and Illumio's guidance is to keep them simple and to mirror the names the organization already uses (`Web`, `Database`, `Production`, `AWS`) — there is no mandated prefix or separator scheme, so **the kit reuses the values and the style the customer's PCE already has** (`label-export`) and only proposes new values in that same style. Illumio applies OR between values of the same type and AND between different types. **workloader creates label values that do not exist, but does not create types**: a CSV column that is not a PCE type is silently ignored by `wkld-import` (umwl-tui detects it in step 3 and offers to discard it or exit to create the type with `label-dimension-import`).
+- **Services.** Port/protocol objects (`DNS`, `Ordering Web 8080`). The report proposes them, but **the kit does not create them**; load them with `workloader svc-import` or from the console when the rules are written.
 
 | Field | Convention | Example |
 |---|---|---|
-| Labels | Prefix by type: `R_<Role>`, `A_<App>`, `E_<Environment>`, `L_<Location>` | `R_DNS`, `A_CoreInfra`, `E_Prod`, `L_OCI` |
-| `name` | `<descriptive role> <IP>`; it is what the console shows and what makes each row unique | `Zabbix Server 10.43.43.21` |
-| `hostname` | **Empty**. The FQDNs in the exports may be pseudonymized; a fake hostname confuses more than it helps. The create pass matches by `name` (`--match name`). | |
-| `interfaces` | `eth0:<ip>` (the console shows it as *eth0: 10.1.1.1*); several interfaces separated by `;` | `eth0:10.43.43.21` |
-| `description` | Analysis comment with the prefix `[<group> P<priority> conf:<Alta\|Media\|Baja>]`; the priority is what `--priority` filters on | `[C3 P1 conf:Alta] Servidor Zabbix: consulta 10050/TCP…` |
+| Labels | One CSV column per label type **key** (`role`, `app`, `env`, `loc`, plus custom keys); value = the label value exactly as it exists in the PCE, or a new one in the same style. Role = function (`Web`, `App`, `Database`, `LoadBalancer` for VIPs only, `DNS`, `Monitoring`, `Backup`…); Application = the business application that owns the host (shared infrastructure gets its own values: `Shared Services`, `Monitoring`, `Security Tools`, `Admin Access`); Environment `Production`/`Staging`; Location = the site or region as the customer names it. | `DNS`, `Shared Services`, `Production`, `DC1` |
+| `name` | `<descriptive role> <IP>`; it is what the console shows and what makes each row unique | `Zabbix Server 10.10.4.21` |
+| `hostname` | **Empty** unless the real hostname is known: the FQDNs in the exports may be pseudonymized, and a fake hostname confuses more than it helps. With blank hostnames the create pass matches by `name` (`--match name`). | |
+| `interfaces` | `eth0:<ip>` (the console shows it as *eth0: 10.1.1.1*); several interfaces separated by `;` | `eth0:10.10.4.21` |
+| `description` | Analysis comment with the prefix `[<group> P<priority> conf:<Alta\|Media\|Baja>]`; the priority is what `--priority` filters on | `[G1 P1 conf:Alta] Servidor Zabbix: consulta 10050/TCP…` |
 | `review` | Working column (PENDING, UPDATED, UNCHANGED; umwl-tui writes NEW, EXISTS-UNMANAGED…); workloader ignores it | |
-| IP lists | `IPL_<Site>_<Use>`; description starts with `[<group>]` and ends with the rule usage | `IPL_CDLV_UserVLAN` |
+| IP lists | Descriptive name in the customer's style (`<what> <use>`); description starts with `[<group>]` and ends with the rule usage | `Corporate DNS`, `Ordering Front-End Subnet` |
 
 ## workloader CSV contract
 
@@ -220,7 +220,7 @@ Recognized headers (everything else is ignored): `href`, `hostname`, `name`, `in
 
 ```
 hostname,name,interfaces,description,role,app,env,loc,review
-,Zabbix Server 10.43.43.21,eth0:10.43.43.21,[C3 P1 conf:Alta] Servidor Zabbix…,R_Monitoring,A_Observability,E_Prod,L_CDLV,PENDING
+,Zabbix Server 10.10.4.21,eth0:10.10.4.21,[G1 P1 conf:Alta] Servidor Zabbix…,Monitoring,Monitoring,Production,DC1,PENDING
 ```
 
 - `interfaces`: `192.168.200.20`, `192.168.200.20/24`, `eth0:192.168.200.20` or `eth0:192.168.200.20/24`, separated by `;`.
@@ -232,7 +232,7 @@ hostname,name,interfaces,description,role,app,env,loc,review
 
 ```
 name,description,include,exclude,fqdns
-IPL_CDLV_DNS,[C4] Corporate resolvers — uso: reglas DNS,192.168.161.92;192.168.161.104;192.168.161.105,,
+Corporate DNS,[G1] Resolutores corporativos — uso: DNS,10.10.0.53;10.10.0.54,,
 ```
 
 - `include` / `exclude`: IPs, CIDRs or ranges separated by `;`. `fqdns` for names.
@@ -244,7 +244,7 @@ Exports carry hostnames, FQDNs, usernames and sometimes the customer's name. `an
 ```bash
 python3 kit/anonymize_export.py anon TrafficData.csv -o TrafficData.anon.csv --map anon-map.json \
     --customer "Customer A" --customer acme --domain customer-a.com --domain corp.acme.local [--public-ips]
-python3 kit/anonymize_export.py deanon C4-umwl-import.csv -o customer-a-umwl-import.csv --map anon-map.json
+python3 kit/anonymize_export.py deanon G1-umwl-import.csv -o customer-a-umwl-import.csv --map anon-map.json
 ```
 
 `anon` maps the Source/Destination Name, Hostname and FQDN columns to `host-0001.company.com` style tokens (domains to `company.com` / `dept.company.com` so tiers stay recognizable), usernames to `user-01…` (well-known service accounts such as `root`, `oracle`, `zabbix` are kept), `--customer` names to "Cliente", and public IPs to `203.0.113.x` / `198.51.100.x` only with `--public-ips`; it ends with a leak check. `deanon` applies the inverse map to any CSV, so the proposed workloads carry the real names in their descriptions before loading. `anon-map.json` (mode 0600, gitignored) is the secret: it never leaves the working folder. The guide (§5) covers what to anonymize and what to attach.
@@ -256,7 +256,7 @@ The analysis is reproduced with a Claude Project whose instructions are `docs/pr
 1. Work only from the attached files; cite the flows behind every inference; verify external facts against official documentation; quality gate before answering (consistent counts, no hostname-derived roles, no invented ports, CSVs that parse with the exact headers and unique names).
 2. Normalize first: Excel-mangled IPs, mixed date formats, truncation at the query limit, populations (VENs in scope, lab hosts, cloud flow logs, scanners), policy-decision vocabulary.
 3. Classify every peer without a VEN: UMWL (one per IP, identifiable server role) or IP list (VLANs, subnets, cloud metadata, SaaS by FQDN); load balancers only for VIPs.
-4. Label model `R_/A_/E_/L_`, reusing the values already in the PCE; `A_` defines the ringfence.
+4. Label model: one column per label type of the PCE, values reused from `label-export` in the customer's own style (no prefixes unless the PCE uses them); the Application label defines the ringfence.
 5. Security findings `S-xx` with severity, evidence and the Illumio policy action; stable IDs across versions.
 6. Deliverables: self-contained HTML report in Spanish, customer-facing, without the customer's name, twelve sections with inline SVG diagrams; `<group>-umwl-import.csv` and `<group>-ipl-import.csv` in the exact workloader contracts above; optional XLSX workbook. For a v2: keep every entry and finding ID, mark "solo v1" / "nuevo", deliver the **full** CSVs again with `review` = PENDING / UPDATED / UNCHANGED.
 

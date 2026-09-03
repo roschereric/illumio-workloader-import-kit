@@ -1,0 +1,14 @@
+name,description,include,exclude,fqdns
+Ordering Front-End Subnet,[G1] Subred de los front-ends y el VIP de Ordering (más el gateway 10.20.1.1) — uso: Ringfence Ordering,10.20.1.0/24,,
+Billing Front-End Subnets,[G1] Subredes de los front-ends y VIP de Billing (una por zona) — uso: Ringfence Billing,10.30.1.0/24;10.30.5.0/24,,
+Corporate DNS,[G1] Resolutores corporativos — uso: DNS,10.10.0.53;10.10.0.54,,
+Corporate NTP,[G1] NTP interno; excluye deliberadamente al público 203.0.113.10 (S-06) — uso: Tiempo,10.10.0.123,,
+Monitoring Servers,"[G1] Zabbix (tres instancias), OEM y Splunk — uso: Monitoreo y logs",10.10.4.21;10.30.4.21;10.30.4.23;10.30.4.22;10.10.4.31,,
+Backup Servers,[G1] NetBackup — uso: Respaldo,10.10.5.10;10.10.5.11,,
+Admin Access,[G1] Origen SSH administrativo — uso: Administración,10.10.7.10,,
+Vulnerability Scanners,[G1] Escáner de vulnerabilidades (S-01) — uso: Escaneo autorizado,10.10.6.40,,
+User VLANs,[G1] VLAN de usuarios que consumen el VIP de Ordering — uso: Consumidores de Ordering,10.100.0.0/16,,
+Cloud Metadata,[G1] Metadata y resolver de la red virtual de la nube — uso: Plataforma cloud,169.254.169.254,,
+Cloud Next Wave,[G1] Subred de los cuatro hosts vistos solo en los registros de flujo de la nube (siguiente ola) — uso: Siguiente ola,10.40.1.0/24,,
+Cloud Provider Services,[G1] Servicios de plataforma del proveedor de nube; cargar los rangos publicados para la región — uso: Plataforma cloud,,,*.objectstorage.example-cloud.com;*.monitoring.example-cloud.com
+EDR SaaS Console,[G1] Consola SaaS del EDR; usar la lista publicada por el fabricante — uso: Agentes de seguridad,,,*.edr.example-vendor.com

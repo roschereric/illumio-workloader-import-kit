@@ -2,7 +2,7 @@
 """
 umwl_loader.py — interactive loader of unmanaged workloads (and IP lists) into an Illumio PCE, on top of workloader.
 
-    python3 umwl_loader.py cliente3-umwl-import.csv [--ipl cliente3-ipl-import.csv] [--pce NAME] [--priority 1]
+    python3 umwl_loader.py sample-umwl-import.csv [--ipl sample-ipl-import.csv] [--pce NAME] [--priority 1]
                            [--workloader /path/to/workloader] [--chunk 20] [--runs ./runs]
 
 What it does, step by step (every step is verbose and asks before anything touches the PCE):

@@ -10,23 +10,24 @@ Adjunto el export de Explorer/Traffic del PCE (`TrafficData….csv`) de la prueb
 (host-NNNN.company.com); las IPs privadas son reales y son la clave.
 
 Alcance: los workloads con VEN que aparecen en el export (identificalos vos: columna Enforcement con valor, hostname
-presente). Grupo: `C4`. Nomenclatura de etiquetas del PCE: prefijos `R_`, `A_`, `E_`, `L_`; valores existentes en
-`pce-labels.csv` (reusalos). Ubicaciones: `L_CDLV` (datacenter) y `L_OCI` (Oracle Cloud). Entorno: `E_Prod` salvo
+presente). Grupo: `G1`. Etiquetas: los tipos son los de `pce-label-types.csv` y los valores existentes están en
+`pce-labels.csv` (reusalos tal cual; si el PCE usa una convención propia de nombres, seguila; si no, valores simples
+como recomienda Illumio). Ubicaciones: `DC1` (datacenter) y `Cloud` (región de nube). Entorno: `Production` salvo
 evidencia en contra.
 
 Entregables, siguiendo el método de las instrucciones del proyecto:
 1. Informe HTML autocontenido en español, customer-facing, sin nombre del cliente, con las 12 secciones y los
    diagramas SVG (composición del export, criterio workload vs lista de IP, arquitectura en capas por aplicación,
    construcción de la fila del CSV).
-2. `C4-umwl-import.csv` (una fila por IP, hostname vacío, name = rol + IP, interfaces eth0:<ip>, descripción con
-   evidencia y prioridad, etiquetas R_/A_/E_/L_, review=PENDING).
-3. `C4-ipl-import.csv` (name,description,include,exclude,fqdns).
+2. `G1-umwl-import.csv` (una fila por IP, hostname vacío salvo que se conozca el real, name = rol + IP, interfaces
+   eth0:<ip>, descripción con evidencia y prioridad, una columna por tipo de etiqueta, review=PENDING).
+3. `G1-ipl-import.csv` (name,description,include,exclude,fqdns).
 4. Un resumen en el chat de 10 líneas: ventana, truncamiento, hosts con VEN, cuántos workloads/listas propone, los
    3 hallazgos más importantes y qué necesitás que confirme yo.
 
 Antes de responder verificá contra documentación oficial cualquier puerto de producto, versión o fecha de fin de
-soporte que menciones, y aplicá la puerta de calidad de las instrucciones (conteos consistentes, sin R_LoadBalancer en
-servidores que no sean VIPs, sin roles derivados de hostnames).
+soporte que menciones, y aplicá la puerta de calidad de las instrucciones (conteos consistentes, sin rol LoadBalancer
+en servidores que no sean VIPs, sin roles derivados de hostnames, sin valores de etiqueta inventados cuando ya existe uno).
 
 ---
 
