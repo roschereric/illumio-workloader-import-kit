@@ -1,0 +1,26 @@
+# workloader binary and source clone (download or build per machine)
+workloader
+workloader.exe
+workloader/
+workloader-src/
+mac-v*.zip
+linux_*-v*.zip
+windows-v*.zip
+
+# PCE credentials: never commit
+pce.yaml
+*.yaml.bak
+
+# run artifacts
+runs/
+*.log
+*-to-create.csv
+*-existing.csv
+*-conflicts.csv
+*-reconcile-report.txt
+
+# python / os / packaging
+__pycache__/
+*.pyc
+.DS_Store
+*.zip

@@ -1,0 +1,15 @@
+name,description,include,exclude,fqdns
+ipl-gcp-vpc,"VPC de GCP donde viven las dos VMs, los DCs del hub, Zabbix y el relé de logs. Confirmar el CIDR real con el equipo de cloud",10.124.0.0/16,,
+ipl-site-mxjl,"LAN del sitio MXJL: DC local, ~45 equipos que hacen ICMP/mDNS hacia el workload, host de gestión 10.52.2.189",10.52.0.0/22,,
+ipl-site-pelm,LAN del sitio PELM y su vecina (bios-chill10),10.71.0.0/22;10.70.1.0/24,,
+ipl-core-services,"Core corporativo: Nagios (10.1.2.37), WSUS (10.1.5.130), DC/NTP (10.1.4.3), DNS (10.1.24.125), proxies Zabbix y escáner (10.27.2.x)",10.1.0.0/16;10.27.2.0/24,,
+ipl-ad-domain-controllers,"DCs efectivamente consumidos por los VEN (sitio, hub GCP, core y vm-prd-ad-001/002)",10.52.3.220;10.71.1.240;10.124.8.15;10.124.8.16;10.124.10.90;10.1.4.3;10.128.6.4;10.128.6.5,,
+ipl-ad-branch-dcs,Los ~22 DCs de sucursal que BIOS-PELM17 consultó (Kerberos/LDAP/SMB + RPC). Una sola lista evita 22 objetos y permite decidir después si ese tráfico se permite o se corrige (hallazgo S-04),10.18.0.2;10.18.64.2;10.18.128.3;10.25.1.10;10.27.2.40;10.28.9.50;10.29.22.50;10.29.31.40;10.29.38.40;10.29.47.50;10.29.54.50;10.29.70.50;10.29.78.40;10.29.80.50;10.30.9.40;10.33.2.20;10.36.2.10;10.37.2.10;10.40.20.10;10.59.48.3;10.59.48.10;10.100.4.50,,
+ipl-dns-resolvers,Resolutores no-DC usados por los VEN,172.20.4.112;10.124.8.1;10.1.24.125,,
+ipl-monitoring,"Todo el plano de monitoreo que consume a los VEN (Zabbix, Nagios, pingers)",10.124.8.70;10.124.8.71;10.124.8.72;10.124.10.30;10.27.2.18;10.1.2.37;10.38.14.10;10.254.2.134;10.254.2.138;10.254.2.139,,
+ipl-admin-access,"Orígenes de SSH, WinRM y RDP administrativo, incluidos los dos de la red 172.28.16-17.x (acceso remoto/VPN)",10.124.8.155;10.124.8.197;10.124.192.37;10.52.2.189;172.28.16.244;172.28.17.186,,
+ipl-gcp-metadata,"Metadata de GCP: DNS, NTP y API para las VMs (32.649 flujos). Obligatoria en cualquier política de GCP",169.254.169.254/32,,
+ipl-saas-cymulate,Consola SaaS del agente de simulación de ataques; preferir FQDN si se publica lista oficial,104.20.35.83;172.66.147.59,,cyagent.app.cymulate.com
+ipl-saas-logscale,Ingesta cloud de Falcon LogScale; cargar la lista publicada por el fabricante en lugar de las IPs observadas,,,flc-api.crowdstrike.com;ec2-*.us-west-1
+ipl-google-services,Actualizaciones y logging de la plataforma para las VMs GCP,,,packages.cloud.google.com;logging.googleapis.com;c.pki.goog
+ipl-redhat,Suscripción y paquetes RHEL para IT.comgdes348,,,cdn.redhat.com;subscription.rhsm.redhat.com
