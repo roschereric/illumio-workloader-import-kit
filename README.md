@@ -447,6 +447,13 @@ After obtaining the v2 CSV, the TUI does the rest: in step 4 the rows whose IP a
 
 ---
 
+## Usage guide, anonymization and the analysis prompt
+
+- `docs/USAGE-GUIDE.md` (also `docs/USAGE-GUIDE.html`, self-contained): the intended end-to-end use — what to export from the PCE (Traffic/Explorer, workloads, labels, label types, IP lists) with schematic screens and expected outcomes, the anonymization chapter, how to run the analysis with a Claude Project, what to review, loading and the v2 cycle.
+- `anonymize_export.py`: consistent, reversible pseudonymization of exports (`anon`) and restoration of real names in the proposed CSVs (`deanon`). The map (`anon-map.json`) never leaves the working folder.
+- `docs/prompts/context.md`: the full method as Claude Project instructions (inputs, normalization, classification criterion, label model, findings, deliverable contracts, v2, quality gate) — independent of any report template.
+- `docs/prompts/prompt-short.md`: the per-conversation message to attach with the export (v1 and v2 variants).
+
 ## Explanatory guide (PDF)
 
 The guide explains with diagrams the end-to-end flow (export → analysis → CSV → kit → workloader → PCE), the requirements and the one-folder-per-account + PCE rule, the initialization of the working folder, the sequence of TUI steps with their decision points, the relationship between the kit and the workloader subcommands, the mapping of CSV columns to PCE fields and labels, and troubleshooting. It is available in two languages, with the same content:

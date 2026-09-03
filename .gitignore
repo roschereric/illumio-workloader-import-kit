@@ -31,3 +31,8 @@ dist/
 go.sandbox.mod
 go.sandbox.sum
 *.ans
+
+# anonymization: the pseudonym map and anonymized copies stay local
+anon-map.json
+*.anon.csv
+*.real.csv
